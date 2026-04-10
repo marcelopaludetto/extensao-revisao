@@ -309,6 +309,91 @@
     footer a {
       color: #3D6CE2 !important;
     }
+
+    /* Ordem das atividades */
+    #platform-select {
+      display: block;
+      width: 100%;
+      padding: 7px 10px;
+      font-size: 12px;
+      border: 1.5px solid #d0d7de;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-family: inherit;
+      color: #0d1117;
+      background: #fff;
+      outline: none;
+      cursor: pointer;
+    }
+
+    #platform-select:focus {
+      border-color: #50DEFF;
+      box-shadow: 0 0 0 2px rgba(80,222,255,0.18);
+    }
+
+    #activity-checklist {
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      max-height: 220px;
+      overflow-y: auto;
+      padding-right: 2px;
+    }
+
+    .act-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 7px;
+      font-size: 12px;
+      line-height: 1.4;
+      padding: 3px 0;
+    }
+
+    .act-item input[type="checkbox"] {
+      margin-top: 2px;
+      flex-shrink: 0;
+      width: 13px;
+      height: 13px;
+      cursor: pointer;
+      accent-color: #50DEFF;
+    }
+
+    .act-item label {
+      cursor: pointer;
+      color: #0d1117;
+    }
+
+    .act-item label .act-note {
+      color: #888;
+      font-size: 11px;
+    }
+
+    .act-item.optional label {
+      color: #57606a;
+    }
+
+    .act-item input[type="checkbox"]:checked + label {
+      text-decoration: line-through;
+      color: #888;
+    }
+
+    .act-reset-btn {
+      width: auto;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
+      background: none;
+      border: 1.5px solid #d0d7de;
+      color: #57606a;
+      border-radius: 6px;
+      cursor: pointer;
+      margin-top: 6px;
+      align-self: flex-start;
+    }
+
+    .act-reset-btn:hover {
+      background: #e6edf3;
+    }
   </style>
 </head>
 
@@ -340,6 +425,19 @@
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
             name="productType" value="efai"> EFAI</label>
       </div>
+      <div class="section-label" style="margin-top:0; margin-bottom:6px;">Ordem das atividades</div>
+      <select id="platform-select">
+        <option value="">Selecione a plataforma…</option>
+        <option value="startlab">StartLab</option>
+        <option value="vscode">VS Code</option>
+        <option value="figma">Figma / p5.js / Python / IA / Cultura digital / Educação Midiática</option>
+        <option value="robotica">Robótica</option>
+        <option value="tecnico">Curso técnico</option>
+      </select>
+      <div id="activity-checklist"></div>
+
+      <hr class="divider">
+
       <button id="start">Start revisão</button>
       <div class="hint">Abra a Home do curso e clique no botão desejado.</div>
       <div id="status" class="status"></div>

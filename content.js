@@ -1101,12 +1101,12 @@
         nextStepBtn.disabled = true;
         nextStepBtn.textContent = "Carregando...";
         overlay.remove();
-        await showSectionTasksStep(state.courseId);
+        await showSectionTasksStep(state.courseId, 0, null, state.platform || null, []);
       });
     }
   }
 
-  async function showSectionTasksStep(courseId, sectionIndex = 0, cachedSections = null) {
+  async function showSectionTasksStep(courseId, sectionIndex = 0, cachedSections = null, platform = null, missingCodes = []) {
     const { modal, overlay } = createOverlayModal("720px");
     modal.innerHTML = `
       <div style="padding-bottom:16px; border-bottom:2px solid #f0f0f0; margin-bottom:4px;">
@@ -1146,7 +1146,7 @@
 
       // Carrega conteúdo de tasks relevantes (única escolha + vídeo)
       const luriMap   = {};  // editUrl → true | false | null
-      const videoMap  = {};  // editUrl → { transcricao, legendaPT, legendaES }
+      const videoMap  = {};  // editUrl → { transcricao, legendaPT, legendaES, uploaderCode }
 
       const tasksToCheck = tasks.filter(t => /única/i.test(t.type) || /vídeo|video/i.test(t.type));
       content.innerHTML = `<p style="color:#888;">Verificando ${tasksToCheck.length} atividade(s)...</p>`;
@@ -1161,15 +1161,15 @@
 
           if (/vídeo|video/i.test(t.type)) {
             const transcricao = result.transcriptionText?.trim().length > 0;
-            let legendaPT = null, legendaES = null;
+            let legendaPT = null, legendaES = null, uploaderCode = null;
             const rawCode = result.videoUrl;
             if (rawCode && rawCode !== "0") {
-              const uploaderCode = rawCode.includes("/") ? rawCode.split("/")[1] : rawCode;
+              uploaderCode = rawCode.includes("/") ? rawCode.split("/")[1] : rawCode;
               const info = await getVideoInfo(uploaderCode, { pt: true, esp: true });
               legendaPT = info.hasPortugues;
               legendaES = info.hasEspanhol;
             }
-            videoMap[t.editUrl] = { transcricao, legendaPT, legendaES };
+            videoMap[t.editUrl] = { transcricao, legendaPT, legendaES, uploaderCode };
           }
         } catch(e) {
           console.error("[Revisor] check error:", t.title, e);
@@ -1213,6 +1213,78 @@
         ${taskRows}
       `;
 
+      // Validação de ordem (via DOM para suportar botão com evento)
+      if (platform) {
+        const orderErrors = validateSectionOrder(tasks, platform);
+        const orderDiv = document.createElement("div");
+        orderDiv.style.marginTop = "12px";
+
+        if (orderErrors.length > 0) {
+          orderDiv.innerHTML = `
+            <div style="padding:10px 12px; border-radius:8px; background:#fff3e0; border:1px solid #e65100;">
+              <div style="font-weight:700; font-size:13px; color:#bf360c; margin-bottom:6px;">⚠️ Ordem incorreta (${PLATFORM_LABELS[platform] || platform}):</div>
+              <ul style="margin:0 0 0 16px; padding:0; font-size:13px; color:#333;">
+                ${orderErrors.map(e => `<li>${e}</li>`).join("")}
+              </ul>
+            </div>`;
+
+          const fixBtn = document.createElement("button");
+          fixBtn.textContent = "Ajustar ordem";
+          fixBtn.style.cssText = "margin-top:8px; padding:8px 16px; border-radius:8px; border:0; cursor:pointer; background:#1565c0; color:#fff; font-size:13px; font-weight:600; font-family:inherit;";
+          fixBtn.addEventListener("click", async () => {
+            fixBtn.disabled = true;
+            fixBtn.textContent = "Ajustando…";
+            try {
+              const correctTasks = computeCorrectOrder(tasks, platform);
+              const orderedIds = correctTasks
+                .map(t => t.editUrl?.match(/\/task\/edit\/(\d+)/)?.[1])
+                .filter(Boolean);
+
+              const resp = await new Promise(resolve =>
+                chrome.runtime.sendMessage({
+                  type: "ALURA_REVISOR_REORDER_SECTION_TASKS",
+                  courseId,
+                  sectionId: section.id,
+                  orderedTaskIds: orderedIds
+                }, resolve)
+              );
+
+              if (resp?.ok) {
+                fixBtn.textContent = "✅ Ordem ajustada!";
+                fixBtn.style.background = "#00c86f";
+                // Recarrega a seção para refletir a nova ordem
+                setTimeout(() => {
+                  overlay.remove();
+                  showSectionTasksStep(courseId, sectionIndex, null, platform, missingCodes);
+                }, 1200);
+              } else {
+                fixBtn.textContent = `❌ ${resp?.error || "Erro ao ajustar"}`;
+                fixBtn.style.background = "#c62828";
+                fixBtn.disabled = false;
+              }
+            } catch (e) {
+              fixBtn.textContent = `❌ ${e.message}`;
+              fixBtn.style.background = "#c62828";
+              fixBtn.disabled = false;
+            }
+          });
+          orderDiv.appendChild(fixBtn);
+        } else {
+          orderDiv.innerHTML = `<div style="padding:8px 12px; border-radius:8px; background:#f0fff5; border:1px solid #00c86f; font-size:13px; font-weight:600; color:#007a42;">✅ Ordem correta (${PLATFORM_LABELS[platform] || platform})</div>`;
+        }
+
+        content.appendChild(orderDiv);
+      }
+
+      // Acumula códigos de vídeo com legenda faltando
+      for (const t of tasks) {
+        if (!/vídeo|video/i.test(t.type)) continue;
+        const v = videoMap[t.editUrl];
+        if (v?.uploaderCode && (v.legendaPT === false || v.legendaES === false)) {
+          if (!missingCodes.includes(v.uploaderCode)) missingCodes.push(v.uploaderCode);
+        }
+      }
+
       // Botão próxima aula
       if (sectionIndex + 1 < totalSections) {
         const nextBtn = document.createElement("button");
@@ -1220,9 +1292,21 @@
         nextBtn.style.cssText = "padding:9px 18px; border:0; border-radius:8px; cursor:pointer; background:#1565c0; color:#fff; font-size:14px; font-weight:600;";
         nextBtn.addEventListener("click", () => {
           overlay.remove();
-          showSectionTasksStep(courseId, sectionIndex + 1, sections);
+          showSectionTasksStep(courseId, sectionIndex + 1, sections, platform, missingCodes);
         });
         footer.insertBefore(nextBtn, footer.querySelector("#aluraRevisorClose"));
+      } else if (missingCodes.length > 0) {
+        // Última seção: botão copiar códigos sem legenda
+        const copyBtn = document.createElement("button");
+        copyBtn.style.cssText = "padding:9px 18px; border:0; border-radius:8px; cursor:pointer; background:#f57c00; color:#fff; font-size:13px; font-weight:600; font-family:inherit;";
+        copyBtn.textContent = `Copiar ${missingCodes.length} código(s) sem legenda`;
+        copyBtn.addEventListener("click", () => {
+          navigator.clipboard.writeText(missingCodes.join("\n")).then(() => {
+            copyBtn.textContent = "Copiado!";
+            setTimeout(() => { copyBtn.textContent = `Copiar ${missingCodes.length} código(s) sem legenda`; }, 1500);
+          });
+        });
+        footer.insertBefore(copyBtn, footer.querySelector("#aluraRevisorClose"));
       }
 
     } catch (e) {
@@ -1331,6 +1415,126 @@
     chrome.runtime.sendMessage({ type: "ALURA_REVISOR_LOAD_VIDEO_DURATION", activityUrl });
   }
 
+  // ---------- Validação de ordem das atividades ----------
+  const PLATFORM_LABELS = {
+    startlab: "StartLab",
+    vscode: "VS Code",
+    figma: "Figma / p5.js / Python / IA / Cultura digital / Educação Midiática",
+    robotica: "Robótica",
+    tecnico: "Curso técnico",
+  };
+
+  const ORDER_TEMPLATES = {
+    startlab: [
+      "oQueVamosAprender", "preparandoAmbiente", "projetoStartlab",
+      "video", "video", "facaComoEuFiz",
+      "exercicio", "exercicio", "exercicio",
+      "paraSaberMais", "horaDoDesafio", "compartilheProjeto",
+      "glossario", "oQueAprendemos", "conclusao",
+    ],
+    vscode: [
+      "oQueVamosAprender", "preparandoAmbiente",
+      "video", "video", "facaComoEuFiz",
+      "exercicio", "exercicio", "exercicio",
+      "paraSaberMais", "horaDoDesafio", "compartilheProjeto",
+      "videosParaSP", "glossario", "oQueAprendemos", "conclusao",
+    ],
+    figma: [
+      "oQueVamosAprender", "preparandoAmbiente",
+      "video", "facaComoEuFiz",
+      "exercicio", "exercicio", "exercicio",
+      "paraSaberMais", "horaDoDesafio", "compartilheProjeto",
+      "glossario", "oQueAprendemos", "conclusao",
+    ],
+    robotica: [
+      "oQueVamosAprender", "preparandoAmbiente", "listaMateriais",
+      "video", "facaComoEuFiz",
+      "exercicio", "exercicio", "exercicio",
+      "paraSaberMais", "horaDoDesafio", "compartilheProjeto",
+      "glossario", "oQueAprendemos", "conclusao",
+    ],
+    tecnico: [
+      "oQueVamosAprender", "preparandoAmbiente",
+      "video", "aprofundamento",
+      "exercicio", "exercicio",
+      "conclusao",
+    ],
+  };
+
+  const EXERCISE_TYPES = /única escolha|múltipla escolha|ordenar blocos|arrastar e soltar|verdadeiro ou falso|preencha os campos|sem resposta do aluno/i;
+
+  function classifyTask(task) {
+    const title = normalizeText(task.title || "").toLowerCase();
+    const type  = task.type || "";
+    if (title.includes("o que vamos aprender"))  return "oQueVamosAprender";
+    if (title.includes("preparando o ambiente") && title.includes("lista de materiais")) return "listaMateriais";
+    if (title.includes("preparando o ambiente")) return "preparandoAmbiente";
+    if (title.includes("projeto startlab"))      return "projetoStartlab";
+    if (title.includes("faça como eu fiz"))      return "facaComoEuFiz";
+    if (title.includes("para saber mais"))       return "paraSaberMais";
+    if (title.includes("hora do desafio"))       return "horaDoDesafio";
+    if (title.includes("compartilhe seu projeto")) return "compartilheProjeto";
+    if (title.includes("videos para sp") || title.includes("vídeos para sp")) return "videosParaSP";
+    if (title.includes("glossário") || title.includes("glossario")) return "glossario";
+    if (title.includes("o que aprendemos"))      return "oQueAprendemos";
+    if (title.includes("conclusão") || title.includes("conclusao")) return "conclusao";
+    if (title.includes("aprofundamento"))        return "aprofundamento";
+    if (type === "Vídeo")                        return "video";
+    if (EXERCISE_TYPES.test(type))               return "exercicio";
+    return null;
+  }
+
+  function computeCorrectOrder(tasks, platform) {
+    if (!platform || !ORDER_TEMPLATES[platform]) return tasks;
+    const template = ORDER_TEMPLATES[platform];
+    const classified = tasks.map(t => ({ task: t, cat: classifyTask(t) }));
+    const used = new Set();
+    const result = [];
+
+    for (const cat of template) {
+      const idx = classified.findIndex((c, i) => !used.has(i) && c.cat === cat);
+      if (idx >= 0) { used.add(idx); result.push(tasks[idx]); }
+    }
+    // Remaining (unknown category or extras) keep their relative order
+    for (let i = 0; i < tasks.length; i++) {
+      if (!used.has(i)) result.push(tasks[i]);
+    }
+    return result;
+  }
+
+  function validateSectionOrder(tasks, platform) {
+    if (!platform || !ORDER_TEMPLATES[platform]) return [];
+    const template = ORDER_TEMPLATES[platform];
+    const errors = [];
+    let ptr = 0;
+
+    for (const task of tasks) {
+      const cat = classifyTask(task);
+      if (!cat) continue;
+
+      // Busca a categoria no template a partir do ponteiro atual
+      let found = -1;
+      for (let i = ptr; i < template.length; i++) {
+        if (template[i] === cat) { found = i; break; }
+      }
+
+      if (found >= 0) {
+        ptr = found + 1;
+      } else {
+        // Verifica se é apenas repetição da última categoria (ex: 4º exercício)
+        const lastMatched = ptr > 0 ? template[ptr - 1] : null;
+        if (lastMatched === cat) continue;
+
+        // Verifica se a categoria já foi consumida (fora de ordem)
+        if (template.slice(0, ptr).includes(cat)) {
+          errors.push(`"${task.title}" (${task.type}) está fora de ordem`);
+        }
+      }
+    }
+
+    return errors;
+  }
+
   // ---------- Revisão via admin ----------
   async function processSectionTasks(courseId, section, si, totalSections, state, updateProgress) {
     const sectionErrors = [];
@@ -1401,6 +1605,15 @@
         if (task.type === "Vídeo" && hasUrl) videoCount++;
         if (task.type === "Texto" && task.title.includes("Aprofundamento")) aprofCount++;
         if (task.type === "Única escolha" && isLuri) luriCount++;
+      }
+    }
+
+    // ---- Validação de ordem das atividades ----
+    if (state.platform) {
+      const orderErrors = validateSectionOrder(tasks, state.platform);
+      if (orderErrors.length > 0) {
+        state.issues.orderIssues = state.issues.orderIssues || [];
+        state.issues.orderIssues.push({ section: section.title, errors: orderErrors });
       }
     }
 
@@ -1513,7 +1726,7 @@
   }
 
   // ---------- Fluxo principal ----------
-  async function startFromHome(productType = "tecnico") {
+  async function startFromHome(productType = "tecnico", platform = null) {
     console.log("[Revisor] startFromHome iniciado");
     await waitFor(() => isHomePage(), 20000);
     console.log("[Revisor] isHomePage OK");
@@ -1536,7 +1749,7 @@
         categorySlug: null,
         courseSlug: null,
         pendingIconCheck: false,
-        issues: { emptyHref: [], githubNonStandard: {}, nonOfficialCloud: {}, link404: {}, missingTranscription: [], adminFields: [], reorderedSections: [], genericSectionNames: [], tecnicoRules: [] },
+        issues: { emptyHref: [], githubNonStandard: {}, nonOfficialCloud: {}, link404: {}, missingTranscription: [], adminFields: [], reorderedSections: [], genericSectionNames: [], tecnicoRules: [], orderIssues: [] },
         error: "Não foi possível obter o ID do curso."
       });
       return;
@@ -1573,13 +1786,14 @@
       pendingIconCheck: false,
       totalActiveVideos: 0,
       productType,
+      platform,
       forumBlocked,
       themeOk,
       expectedTheme,
       actualTheme: theme,
       sub27: subResults.sub27,
       sub126: subResults.sub126,
-      issues: { emptyHref: [], githubNonStandard: {}, nonOfficialCloud: {}, link404: {}, missingTranscription: [], adminFields: [], reorderedSections: [], genericSectionNames: [], tecnicoRules: [] },
+      issues: { emptyHref: [], githubNonStandard: {}, nonOfficialCloud: {}, link404: {}, missingTranscription: [], adminFields: [], reorderedSections: [], genericSectionNames: [], tecnicoRules: [], orderIssues: [] },
       error: null
     });
   }
@@ -2126,7 +2340,7 @@
         if (!isHomePage()) return sendResponse({ ok: false, error: "Abra a Home do curso antes de clicar Start." });
 
         sendResponse({ ok: true });
-        await startFromHome(msg.productType || "tecnico");
+        await startFromHome(msg.productType || "tecnico", msg.platform || null);
         startHeartbeat();
       } catch (e) {
         sendResponse({ ok: false, error: e?.message || String(e) });

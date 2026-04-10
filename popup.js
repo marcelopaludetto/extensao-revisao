@@ -1,6 +1,130 @@
 const KEY = "aluraRevisorRunState";
 const KEY_HISTORY = "aluraRevisorHistory";
 
+// ---------- Ordem das atividades ----------
+const ACTIVITY_ORDERS = {
+  startlab: [
+    { label: "Vídeo 1.1 - O que vamos aprender?", note: "apenas aula 01", optional: true },
+    { label: "Preparando o ambiente", note: "caso tenha", optional: true },
+    { label: "Projeto Startlab" },
+    { label: "Vídeo X.X" },
+    { label: "Vídeo X.X" },
+    { label: "Faça como eu fiz" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Para saber mais", note: "caso tenha", optional: true },
+    { label: "Hora do desafio" },
+    { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
+    { label: "Glossário", note: "caso tenha", optional: true },
+    { label: "O que aprendemos (em vídeo)" },
+    { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
+  ],
+  vscode: [
+    { label: "Vídeo 1.1 - O que vamos aprender?", note: "apenas aula 01", optional: true },
+    { label: "Preparando o ambiente", note: "caso tenha", optional: true },
+    { label: "Vídeo X.X" },
+    { label: "Vídeo X.X" },
+    { label: "Faça como eu fiz" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Para saber mais", note: "caso tenha", optional: true },
+    { label: "Hora do desafio" },
+    { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
+    { label: "Videos para SP", note: "aula 1 de código, aula 2 de código", optional: true },
+    { label: "Glossário", note: "caso tenha", optional: true },
+    { label: "O que aprendemos (em vídeo)" },
+    { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
+  ],
+  figma: [
+    { label: "Vídeo 1.1 - O que vamos aprender?", note: "apenas aula 01", optional: true },
+    { label: "Preparando o ambiente", note: "caso tenha", optional: true },
+    { label: "Vídeo X.X" },
+    { label: "Faça como eu fiz" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Para saber mais", note: "caso tenha", optional: true },
+    { label: "Hora do desafio" },
+    { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
+    { label: "Glossário", note: "caso tenha", optional: true },
+    { label: "O que aprendemos (em vídeo)" },
+    { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
+  ],
+  robotica: [
+    { label: "Vídeo 1.1 - O que vamos aprender?", note: "apenas aula 01", optional: true },
+    { label: "Preparando o ambiente", note: "caso tenha", optional: true },
+    { label: "Preparando o ambiente: Lista de materiais", note: "em todas as aulas com componentes físicos", optional: true },
+    { label: "Vídeo X.X" },
+    { label: "Faça como eu fiz" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Para saber mais", note: "caso tenha", optional: true },
+    { label: "Hora do desafio" },
+    { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
+    { label: "Glossário", note: "caso tenha", optional: true },
+    { label: "O que aprendemos (em vídeo)" },
+    { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
+  ],
+  tecnico: [
+    { label: "Vídeo 1.1 - O que vamos aprender?", note: "apenas aula 01", optional: true },
+    { label: "Preparando o ambiente", note: "caso tenha", optional: true },
+    { label: "Vídeo X.X" },
+    { label: "Aprofundamento" },
+    { label: "Exercício" },
+    { label: "Exercício" },
+    { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
+  ],
+};
+
+function renderActivityChecklist(platform) {
+  const container = document.getElementById("activity-checklist");
+  if (!container) return;
+
+  if (!platform || !ACTIVITY_ORDERS[platform]) {
+    container.innerHTML = "";
+    return;
+  }
+
+  const items = ACTIVITY_ORDERS[platform];
+  const fragment = document.createDocumentFragment();
+
+  items.forEach((item, i) => {
+    const div = document.createElement("div");
+    div.className = "act-item" + (item.optional ? " optional" : "");
+
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.id = `act-cb-${i}`;
+
+    const lbl = document.createElement("label");
+    lbl.htmlFor = `act-cb-${i}`;
+    lbl.innerHTML = item.label + (item.note ? ` <span class="act-note">(${item.note})</span>` : "");
+
+    div.appendChild(cb);
+    div.appendChild(lbl);
+    fragment.appendChild(div);
+  });
+
+  const resetBtn = document.createElement("button");
+  resetBtn.className = "act-reset-btn";
+  resetBtn.textContent = "Limpar";
+  resetBtn.addEventListener("click", () => {
+    container.querySelectorAll("input[type='checkbox']").forEach((cb) => (cb.checked = false));
+  });
+  fragment.appendChild(resetBtn);
+
+  container.innerHTML = "";
+  container.appendChild(fragment);
+}
+
+const platformSelect = document.getElementById("platform-select");
+if (platformSelect) {
+  platformSelect.addEventListener("change", () => renderActivityChecklist(platformSelect.value));
+}
+
 const statusEl = document.getElementById("status");
 const btn = document.getElementById("start");
 const historyEl = document.getElementById("history");
@@ -169,7 +293,8 @@ btn.addEventListener("click", async () => {
       setStatus("Iniciando…");
       const tab = await getActiveTab();
       const productType = document.querySelector('input[name="productType"]:checked')?.value || "tecnico";
-      const ack = await chrome.tabs.sendMessage(tab.id, { type: "ALURA_REVISOR_START", productType });
+      const platform = document.getElementById("platform-select")?.value || null;
+      const ack = await chrome.tabs.sendMessage(tab.id, { type: "ALURA_REVISOR_START", productType, platform: platform || null });
 
       if (!ack?.ok) {
         setStatus(`Não iniciou: ${ack?.error || "erro desconhecido"}`);

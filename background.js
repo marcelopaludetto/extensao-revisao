@@ -1379,5 +1379,74 @@ async function verificarAtualizacao() {
   }
 }
 
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_REORDER_SECTION_TASKS") return;
+
+  (async () => {
+    let tabId;
+    try {
+      const baseUrl = new URL(sender.url).origin;
+      const url = `${baseUrl}/admin/course/v2/${encodeURIComponent(msg.courseId)}/section/${encodeURIComponent(msg.sectionId)}/tasks`;
+      tabId = await openTab(url);
+
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (orderedTaskIds) => {
+          const tbody = document.querySelector("#tasks-table tbody");
+          if (!tbody) return { ok: false, error: "#tasks-table tbody não encontrado" };
+
+          const rows = [...tbody.querySelectorAll("tr")];
+
+          // Mapeia cada linha ao ID da task (via input[name='sectionIds'] ou link de edição)
+          const rowsWithId = rows.map(tr => {
+            const id = tr.querySelector("input[name='sectionIds']")?.value
+              || tr.querySelector("a[href*='/task/edit/']")?.href?.match(/\/task\/edit\/(\d+)/)?.[1]
+              || "";
+            return { tr, id };
+          });
+
+          const orderedSet = new Set(orderedTaskIds.map(String));
+
+          // Primeiro: linhas na ordem desejada; depois: linhas restantes (categoria desconhecida)
+          const ordered = orderedTaskIds
+            .map(id => rowsWithId.find(r => r.id === String(id)))
+            .filter(Boolean);
+          const rest = rowsWithId.filter(r => !orderedSet.has(r.id));
+          const sorted = [...ordered, ...rest];
+
+          // Reinsere linhas na nova ordem
+          for (const { tr } of sorted) tbody.appendChild(tr);
+
+          const btn = document.querySelector("#button__submit");
+          if (!btn) return { ok: false, error: "Botão 'Alterar ordem' não encontrado" };
+          btn.click();
+
+          return { ok: true };
+        },
+        args: [msg.orderedTaskIds || []]
+      });
+
+      const res = results?.[0]?.result;
+      if (!res?.ok) {
+        sendResponse({ ok: false, error: res?.error || "Erro desconhecido" });
+        return;
+      }
+
+      // Aguarda o form POST recarregar a página
+      await new Promise(r => setTimeout(r, 500));
+      await waitForTabComplete(tabId, 10000);
+
+      sendResponse({ ok: true });
+    } catch (e) {
+      sendResponse({ ok: false, error: e?.message || String(e) });
+    } finally {
+      if (tabId != null) chrome.tabs.remove(tabId).catch(() => {});
+    }
+  })();
+
+  return true;
+});
+
 chrome.runtime.onInstalled.addListener(verificarAtualizacao);
 chrome.runtime.onStartup.addListener(verificarAtualizacao);

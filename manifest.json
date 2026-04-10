@@ -1,9 +1,9 @@
 {
   "manifest_version": 3,
-  "name": "Revisor de Conteúdo ",
-  "version": "0.3.3",
+  "name": "Start facilitadora de revisão",
+  "version": "3.0",
   "update_url": "https://hub-producao-conteudo.vercel.app/update.xml",
-  "description": "Realiza a revisão dos cursos da Alura, garantindo que estejam alinhados aos padrões de qualidade e corrigindo eventuais erros.",
+  "description": "Realiza a revisão dos cursos da Start, garantindo que estejam alinhados aos padrões de qualidade e corrigindo eventuais erros.",
   "permissions": ["activeTab", "scripting", "storage", "notifications", "downloads", "identity"],
   "host_permissions": ["https://cursos.alura.com.br/*", "https://*/*"],
   "icons": {
@@ -19,6 +19,7 @@
       "48": "icon48.png",
       "128": "icon128.png"
     }
+
   },
   "background": {
     "service_worker": "background.js",
