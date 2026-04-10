@@ -394,6 +394,165 @@
     .act-reset-btn:hover {
       background: #e6edf3;
     }
+
+    /* ── Desativar em lote ──────────────────────────────────────── */
+    .deact-section-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: #0d1117;
+      padding: 4px 0 2px;
+      border-top: 1px solid #d0d7de;
+      margin-top: 2px;
+    }
+
+    .deact-task-item {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 11px;
+      padding: 3px 4px;
+      border-radius: 4px;
+      color: #444d56;
+    }
+
+    .deact-task-item:hover { background: #f0f4f8; }
+
+    .deact-task-item input[type="checkbox"] {
+      flex-shrink: 0;
+      accent-color: #CA3328;
+      cursor: pointer;
+    }
+
+    .deact-task-item label {
+      cursor: pointer;
+      line-height: 1.3;
+    }
+
+    .deact-task-item .deact-type {
+      color: #9761FF;
+      font-size: 10px;
+      margin-left: 2px;
+    }
+
+    .deact-task-item.inactive label { color: #bbb; text-decoration: line-through; }
+
+    /* ── Publicação ─────────────────────────────────────────────── */
+    .pub-drop-area {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      border: 2px dashed #d0d7de;
+      border-radius: 8px;
+      padding: 10px 12px;
+      font-size: 12px;
+      color: #57606a;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 10px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .pub-drop-area.drag-over,
+    .pub-drop-area:hover {
+      border-color: #50DEFF;
+      background: #f0fbff;
+      color: #0d1117;
+    }
+
+    .pub-drop-area input[type="file"] {
+      display: none;
+    }
+
+    .pub-course-info {
+      font-size: 11px;
+      color: #57606a;
+      margin-bottom: 10px;
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+
+    .pub-course-info strong {
+      color: #0d1117;
+    }
+
+    .pub-lesson-card {
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 8px;
+      background: #fff;
+    }
+
+    .pub-lesson-header {
+      font-size: 12px;
+      font-weight: 700;
+      color: #0d1117;
+      margin-bottom: 3px;
+    }
+
+    .pub-lesson-num {
+      color: #9761FF;
+    }
+
+    .pub-lesson-name {
+      font-weight: 400;
+      color: #444d56;
+    }
+
+    .pub-lesson-activity {
+      font-size: 11px;
+      color: #3D6CE2;
+      margin-bottom: 8px;
+    }
+
+    .pub-btn {
+      width: auto;
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #9761FF;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .pub-btn:hover:not(:disabled) {
+      background: #7c4de8;
+    }
+
+    .pub-btn:disabled {
+      opacity: 0.6;
+      cursor: default;
+    }
+
+    .pub-btn.done {
+      background: #56A145;
+    }
+
+    .pub-lesson-status {
+      font-size: 11px;
+      margin-top: 5px;
+      min-height: 14px;
+    }
+
+    .pub-lesson-status.ok    { color: #56A145; font-weight: 600; }
+    .pub-lesson-status.error { color: #CA3328; }
+    .pub-lesson-status.loading { color: #F79722; }
+
+    #pub-all-btn {
+      background: #9761FF;
+      color: #fff;
+      margin-top: 4px;
+    }
+
+    #pub-all-btn:hover {
+      background: #7c4de8;
+    }
   </style>
 </head>
 
@@ -410,6 +569,7 @@
   <div class="tab-bar">
     <button class="tab active" id="tab-review-btn">Revisão</button>
     <button class="tab" id="tab-tools-btn">Ferramentas</button>
+    <button class="tab" id="tab-publish-btn">Publicação</button>
   </div>
   <div class="popup-body">
 
@@ -482,6 +642,42 @@
 
       <hr class="divider">
 
+      <div class="section-label">Desativar atividades em lote</div>
+      <input type="text" id="deact-course-id" placeholder="ID do curso (ex: 5285)">
+      <button id="deact-fetch-btn" style="background:#0d1117;color:#50DEFF;border:1.5px solid #50DEFF;">Buscar atividades</button>
+      <div id="deact-status" style="margin-top:6px;font-size:12px;color:#444d56;"></div>
+      <div id="deact-list" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;"></div>
+      <div id="deact-actions" style="display:none;margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+        <button id="deact-confirm-btn" style="width:auto;padding:6px 14px;font-size:12px;background:#CA3328;color:#fff;border-radius:6px;">Desativar selecionadas</button>
+        <button id="deact-select-all-btn" style="width:auto;padding:6px 10px;font-size:11px;background:none;border:1.5px solid #d0d7de;color:#57606a;border-radius:6px;">Selecionar tudo</button>
+        <span id="deact-count" style="font-size:11px;color:#57606a;"></span>
+      </div>
+
+      <hr class="divider">
+
+
+    </div>
+
+    <!-- ABA: Publicação -->
+    <div id="tab-publish" style="display:none">
+
+      <div class="section-label" style="margin-top:0">Desafio</div>
+
+      <label class="pub-drop-area" id="pub-drop-area" for="pub-file-input">
+        <input type="file" id="pub-file-input" accept=".txt,.docx,.doc">
+        <span>📄 Arraste ou clique para selecionar o <strong>.txt</strong></span>
+      </label>
+
+      <div class="pub-course-info" id="pub-course-info" style="display:none">
+        Curso <strong id="pub-course-id-display">-</strong>
+        &middot;
+        <span id="pub-lesson-count"></span>
+      </div>
+
+      <div id="pub-lessons"></div>
+
+      <button id="pub-all-btn" style="display:none">Publicar todas as aulas</button>
+      <div id="pub-global-status" style="margin-top:8px;font-size:12px;color:#444d56;"></div>
 
     </div>
 

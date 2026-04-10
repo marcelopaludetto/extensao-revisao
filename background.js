@@ -1450,3 +1450,246 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
 chrome.runtime.onInstalled.addListener(verificarAtualizacao);
 chrome.runtime.onStartup.addListener(verificarAtualizacao);
+
+// ---------- Desativar atividade ----------
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_DEACTIVATE_TASK") return;
+
+  (async () => {
+    let tabId;
+    try {
+      tabId = await openTab(msg.editUrl);
+
+      // Aguarda o select de status carregar
+      let ready = false;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => !!document.getElementById("task.status")
+        });
+        if (res?.[0]?.result) { ready = true; break; }
+      }
+
+      if (!ready) {
+        sendResponse({ ok: false, error: "Campo de status não encontrado." });
+        return;
+      }
+
+      // Seta INACTIVE e salva
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const sel = document.getElementById("task.status");
+          if (!sel) return;
+          sel.value = "INACTIVE";
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          const btn = document.querySelector("#submitTask, button[type='submit']");
+          btn?.click();
+        }
+      });
+
+      await new Promise(r => setTimeout(r, 1500));
+      sendResponse({ ok: true });
+    } catch (e) {
+      sendResponse({ ok: false, error: e?.message || String(e) });
+    } finally {
+      if (tabId != null) {
+        await new Promise(r => setTimeout(r, 300));
+        chrome.tabs.remove(tabId).catch(() => {});
+      }
+    }
+  })();
+
+  return true;
+});
+
+// ---------- Publicação: Desafio ----------
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_PUBLISH_DESAFIO_TASK") return;
+
+  (async () => {
+    let tabId;
+    try {
+      const baseUrl = "https://cursos.alura.com.br";
+
+      // 1. Abrir página de seções para descobrir o sectionId da aula
+      const sectionsUrl = `${baseUrl}/admin/courses/v2/${msg.courseId}/sections`;
+      tabId = await openTab(sectionsUrl);
+
+      let sections = [];
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(r => setTimeout(r, 800));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            const rows = document.querySelectorAll("#sectionIds tbody tr");
+            if (!rows.length) return null;
+            return [...rows].map(tr => ({
+              id: tr.id,
+              title: tr.cells[2]?.textContent?.trim() ?? "",
+            })).filter(s => s.id);
+          }
+        });
+        if (res?.[0]?.result?.length) { sections = res[0].result; break; }
+      }
+
+      const section = sections[msg.lessonNum - 1];
+      if (!section?.id) {
+        sendResponse({ ok: false, error: `Seção da Aula ${msg.lessonNum} não encontrada (total: ${sections.length}).` });
+        return;
+      }
+
+      // 2. Navegar para a página de criação de atividade da seção
+      const createUrl = `${baseUrl}/admin/course/v2/${msg.courseId}/section/${section.id}/task/create`;
+      await chrome.tabs.update(tabId, { url: createUrl });
+
+      // Aguardar #chooseTask
+      let chooseReady = false;
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => !!document.querySelector("#chooseTask")
+        });
+        if (res?.[0]?.result) { chooseReady = true; break; }
+      }
+
+      if (!chooseReady) {
+        sendResponse({ ok: false, error: "Página de criação não carregou (#chooseTask)." });
+        return;
+      }
+
+      // 3. Selecionar "Para saber mais" no <select> do #chooseTask
+      const clicked = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const option = document.querySelector('option[data-title="Para saber mais"]');
+          if (!option) return { ok: false, error: "option não encontrada" };
+
+          const select = option.closest("select");
+          if (!select) return { ok: false, error: "select não encontrado" };
+
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+
+          return { ok: true };
+        }
+      });
+
+      if (!clicked?.[0]?.result?.ok) {
+        sendResponse({ ok: false, error: `"Para saber mais" não encontrado. ${clicked?.[0]?.result?.error || ""}` });
+        return;
+      }
+
+      // 4. Aguardar o formulário de criação carregar (nome + editor)
+      let formReady = false;
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => !!(document.querySelector("#submitTask") && document.querySelector(".CodeMirror, .hackeditor, [contenteditable='true']"))
+        });
+        if (res?.[0]?.result) { formReady = true; break; }
+      }
+
+      if (!formReady) {
+        sendResponse({ ok: false, error: "Formulário de criação não carregou após selecionar 'Para saber mais'." });
+        return;
+      }
+
+      // 5. Preencher o nome da atividade
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (name) => {
+          const selectors = [
+            'input[name="title"]', 'input[name="name"]', 'input[name="taskTitle"]',
+            'input[placeholder*="ome"]', 'input[placeholder*="ítulo"]',
+            '.form-group input[type="text"]'
+          ];
+          for (const sel of selectors) {
+            const el = document.querySelector(sel);
+            if (el) {
+              el.value = name;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              return sel;
+            }
+          }
+          return null;
+        },
+        args: ["Hora do desafio!"]
+      });
+
+      // 6. Preencher o conteúdo no editor via foco + clipboard paste
+      await new Promise(r => setTimeout(r, 400));
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (content) => {
+          // Encontra o textarea interno do CodeMirror (onde o foco real fica)
+          const cmTextarea = document.querySelector(".CodeMirror textarea");
+          const cmEl = document.querySelector(".CodeMirror");
+
+          if (cmEl?.CodeMirror && cmTextarea) {
+            // 1. Copia o conteúdo para o clipboard via textarea temporário
+            const tmp = document.createElement("textarea");
+            tmp.value = content;
+            tmp.style.cssText = "position:fixed;opacity:0;top:0;left:0;";
+            document.body.appendChild(tmp);
+            tmp.focus();
+            tmp.select();
+            document.execCommand("copy");
+            document.body.removeChild(tmp);
+
+            // 2. Foca o CodeMirror (adiciona CodeMirror-focused) e seleciona tudo
+            cmEl.CodeMirror.focus();
+            cmEl.CodeMirror.execCommand("selectAll");
+
+            // 3. Cola via Ctrl+V simulado no textarea interno do CodeMirror
+            cmTextarea.focus();
+            document.execCommand("paste");
+
+            return "codemirror-paste";
+          }
+
+          // Fallback: setValue direto (sem foco)
+          if (cmEl?.CodeMirror) {
+            cmEl.CodeMirror.setValue(content);
+            return "codemirror-setvalue";
+          }
+
+          return null;
+        },
+        args: [msg.content]
+      });
+
+      // 7. Clicar em Salvar
+      await new Promise(r => setTimeout(r, 500));
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const btn = document.querySelector("#submitTask");
+          if (btn) { btn.click(); return true; }
+          return false;
+        }
+      });
+
+      // Aguardar o salvamento processar
+      await new Promise(r => setTimeout(r, 2500));
+      sendResponse({ ok: true });
+
+    } catch (e) {
+      sendResponse({ ok: false, error: e?.message || String(e) });
+    } finally {
+      if (tabId != null) {
+        await new Promise(r => setTimeout(r, 500));
+        chrome.tabs.remove(tabId).catch(() => {});
+      }
+    }
+  })();
+
+  return true;
+});

@@ -3012,5 +3012,60 @@
     return true;
   });
 
+  // ---------- Desativar em lote: busca seções ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_DEACT_GET_SECTIONS") return;
+    (async () => {
+      try {
+        const resp = await sendToBackground({ type: "ALURA_REVISOR_GET_SECTIONS", courseId: msg.courseId });
+        sendResponse(resp);
+      } catch (e) { sendResponse({ ok: false, error: e.message }); }
+    })();
+    return true;
+  });
+
+  // ---------- Desativar em lote: busca tasks de uma seção ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_DEACT_GET_TASKS") return;
+    (async () => {
+      try {
+        const resp = await sendToBackground({
+          type: "ALURA_REVISOR_GET_SECTION_TASKS",
+          courseId: msg.courseId, sectionId: msg.sectionId, includeInactive: true
+        });
+        sendResponse({ ok: resp.ok, sectionId: msg.sectionId, sectionTitle: msg.sectionTitle, tasks: resp.tasks || [], error: resp.error });
+      } catch (e) { sendResponse({ ok: false, sectionId: msg.sectionId, sectionTitle: msg.sectionTitle, tasks: [], error: e.message }); }
+    })();
+    return true;
+  });
+
+  // ---------- Desativar em lote: desativa uma task ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_DEACTIVATE_TASK") return;
+    (async () => {
+      try {
+        const resp = await sendToBackground({ type: "ALURA_REVISOR_DEACTIVATE_TASK", editUrl: msg.editUrl });
+        sendResponse(resp);
+      } catch (e) { sendResponse({ ok: false, error: e.message }); }
+    })();
+    return true;
+  });
+
+  // ---------- Publicação: Desafio via popup ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_PUBLISH_DESAFIO_TASK") return;
+
+    (async () => {
+      try {
+        const resp = await sendToBackground(msg);
+        sendResponse(resp);
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
+
+    return true;
+  });
+
   // ================================================================
 })();

@@ -252,25 +252,506 @@ if (githubTokenSaveBtn) {
   });
 }
 
+// ---------- Desativar atividades em lote ----------
+const deactCourseIdEl  = document.getElementById("deact-course-id");
+const deactFetchBtn    = document.getElementById("deact-fetch-btn");
+const deactStatusEl    = document.getElementById("deact-status");
+const deactListEl      = document.getElementById("deact-list");
+const deactActionsEl   = document.getElementById("deact-actions");
+const deactConfirmBtn  = document.getElementById("deact-confirm-btn");
+const deactSelectAllBtn= document.getElementById("deact-select-all-btn");
+const deactCountEl     = document.getElementById("deact-count");
+
+let deactAllTasks = [];
+
+function updateDeactCount() {
+  const checked = deactListEl.querySelectorAll("input[type='checkbox']:checked").length;
+  deactCountEl.textContent = checked ? `${checked} selecionada(s)` : "";
+}
+
+function renderDeactList(sections) {
+  deactListEl.innerHTML = "";
+  deactAllTasks = [];
+
+  sections.forEach(sec => {
+    if (!sec.tasks.length) return;
+
+    const secLabel = document.createElement("div");
+    secLabel.className = "deact-section-label";
+    secLabel.textContent = sec.title || `Seção ${sec.id}`;
+    deactListEl.appendChild(secLabel);
+
+    sec.tasks.forEach(task => {
+      deactAllTasks.push({ ...task, sectionTitle: sec.title });
+
+      const item = document.createElement("div");
+      item.className = "deact-task-item" + (task.active ? "" : " inactive");
+
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = `deact-cb-${task.id}`;
+      cb.dataset.editUrl = task.editUrl;
+      cb.disabled = !task.active;
+      cb.addEventListener("change", updateDeactCount);
+
+      const lbl = document.createElement("label");
+      lbl.htmlFor = cb.id;
+      lbl.innerHTML = `${task.title} <span class="deact-type">${task.type}</span>`;
+
+      item.appendChild(cb);
+      item.appendChild(lbl);
+      deactListEl.appendChild(item);
+    });
+  });
+
+  deactActionsEl.style.display = deactAllTasks.length ? "flex" : "none";
+  updateDeactCount();
+}
+
+deactFetchBtn?.addEventListener("click", async () => {
+  const courseId = deactCourseIdEl.value.trim();
+  if (!courseId) { deactStatusEl.textContent = "Informe o ID do curso."; return; }
+
+  deactFetchBtn.disabled = true;
+  deactStatusEl.textContent = "Buscando seções…";
+  deactListEl.innerHTML = "";
+  deactActionsEl.style.display = "none";
+
+  try {
+    const tab = await getActiveTab();
+    const secResp = await chrome.tabs.sendMessage(tab.id, {
+      type: "ALURA_REVISOR_DEACT_GET_SECTIONS", courseId
+    });
+    if (!secResp?.ok) throw new Error(secResp?.error || "Erro ao buscar seções");
+
+    const sections = secResp.sections;
+    deactStatusEl.textContent = `Buscando atividades de ${sections.length} seção(ões)…`;
+
+    const results = [];
+    for (let i = 0; i < sections.length; i += 3) {
+      const batch = sections.slice(i, i + 3);
+      const batchResults = await Promise.all(batch.map(sec =>
+        chrome.tabs.sendMessage(tab.id, {
+          type: "ALURA_REVISOR_DEACT_GET_TASKS",
+          courseId, sectionId: sec.id, sectionTitle: sec.title
+        })
+      ));
+      results.push(...batchResults);
+    }
+
+    const sectionsWithTasks = results
+      .filter(r => r?.ok)
+      .map(r => ({ id: r.sectionId, title: r.sectionTitle, tasks: r.tasks }));
+
+    const total = sectionsWithTasks.reduce((a, s) => a + s.tasks.length, 0);
+    deactStatusEl.textContent = `${total} atividade(s) encontrada(s).`;
+    renderDeactList(sectionsWithTasks);
+  } catch (e) {
+    deactStatusEl.textContent = `Erro: ${e.message}`;
+  } finally {
+    deactFetchBtn.disabled = false;
+  }
+});
+
+deactSelectAllBtn?.addEventListener("click", () => {
+  const cbs = deactListEl.querySelectorAll("input[type='checkbox']:not(:disabled)");
+  const allChecked = [...cbs].every(cb => cb.checked);
+  cbs.forEach(cb => cb.checked = !allChecked);
+  updateDeactCount();
+});
+
+deactConfirmBtn?.addEventListener("click", async () => {
+  const selected = [...deactListEl.querySelectorAll("input[type='checkbox']:checked")];
+  if (!selected.length) { deactStatusEl.textContent = "Nenhuma atividade selecionada."; return; }
+
+  if (!confirm(`Desativar ${selected.length} atividade(s)?`)) return;
+
+  deactConfirmBtn.disabled = true;
+  let done = 0;
+  const tab = await getActiveTab();
+
+  for (const cb of selected) {
+    deactStatusEl.textContent = `Desativando ${done + 1} de ${selected.length}…`;
+    try {
+      const resp = await chrome.tabs.sendMessage(tab.id, {
+        type: "ALURA_REVISOR_DEACTIVATE_TASK",
+        editUrl: cb.dataset.editUrl,
+      });
+      if (resp?.ok) {
+        cb.disabled = true;
+        cb.checked = false;
+        cb.closest(".deact-task-item")?.classList.add("inactive");
+      }
+    } catch { /* continua */ }
+    done++;
+  }
+
+  deactStatusEl.textContent = `✅ ${done} atividade(s) desativada(s).`;
+  deactConfirmBtn.disabled = false;
+  updateDeactCount();
+});
+
 // ---------- Tab switching ----------
 const tabReviewBtn = document.getElementById("tab-review-btn");
 const tabToolsBtn = document.getElementById("tab-tools-btn");
+const tabPublishBtn = document.getElementById("tab-publish-btn");
 const tabReview = document.getElementById("tab-review");
 const tabTools = document.getElementById("tab-tools");
+const tabPublish = document.getElementById("tab-publish");
 
-tabReviewBtn.addEventListener("click", () => {
-  tabReviewBtn.classList.add("active");
-  tabToolsBtn.classList.remove("active");
-  tabReview.style.display = "";
-  tabTools.style.display = "none";
-});
+function switchTab(active) {
+  [tabReviewBtn, tabToolsBtn, tabPublishBtn].forEach(b => b.classList.remove("active"));
+  [tabReview, tabTools, tabPublish].forEach(p => p.style.display = "none");
+  active.btn.classList.add("active");
+  active.panel.style.display = "";
+}
 
-tabToolsBtn.addEventListener("click", () => {
-  tabToolsBtn.classList.add("active");
-  tabReviewBtn.classList.remove("active");
-  tabTools.style.display = "";
-  tabReview.style.display = "none";
-});
+tabReviewBtn.addEventListener("click", () => switchTab({ btn: tabReviewBtn, panel: tabReview }));
+tabToolsBtn.addEventListener("click", () => switchTab({ btn: tabToolsBtn, panel: tabTools }));
+tabPublishBtn.addEventListener("click", () => switchTab({ btn: tabPublishBtn, panel: tabPublish }));
+
+// ---------- Publicação: conversão para Markdown ----------
+function textToMarkdown(text) {
+  // Normaliza quebras de linha
+  const lines = text.split("\n").map(l => l.trimEnd());
+  const out = [];
+  let blankCount = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const raw = lines[i];
+    const line = raw.trim();
+
+    // Linha vazia: acumula até 1 quebra de parágrafo
+    if (!line) {
+      blankCount++;
+      if (blankCount === 1) out.push("");
+      continue;
+    }
+    blankCount = 0;
+
+    // Blockquote markdown: > **texto**
+    if (line.startsWith(">")) {
+      out.push(line);
+      continue;
+    }
+
+    // Bloco HTML (links StartLab com imagem)
+    if (line.startsWith("<a ") || line.startsWith("<img ")) {
+      out.push(line);
+      continue;
+    }
+
+    // Título/cabeçalho markdown já existente
+    if (line.startsWith("#")) {
+      out.push(line);
+      continue;
+    }
+
+    // Lista numerada (já vem do parser com "1. texto") — normaliza espaço extra
+    const listMatch = line.match(/^(\s*)(\d+)\.\s+(.+)/);
+    if (listMatch) {
+      out.push(`${listMatch[1]}${listMatch[2]}. ${listMatch[3]}`);
+      continue;
+    }
+
+    // Lista com hífen/bullet
+    const bulletMatch = line.match(/^[-•]\s+(.+)/);
+    if (bulletMatch) {
+      out.push(`- ${bulletMatch[1]}`);
+      continue;
+    }
+
+    // Linha normal: aplica formatação inline
+    let md = line
+      .replace(/\*\*(.*?)\*\*/g, "**$1**")   // já estava bold, mantém
+      .replace(/__(.*?)__/g, "**$1**");        // __ → **
+
+    out.push(md);
+  }
+
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+
+// ---------- Publicação: parsing ----------
+function parseDesafioDoc(text) {
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lessons = [];
+
+  // Divide o documento a cada "Aula N" no início de uma linha
+  const parts = text.split(/(?=^\s*Aula\s+\d+\s*$)/m);
+
+  for (const part of parts) {
+    const lessonMatch = part.match(/^\s*Aula\s+(\d+)\s*$/m);
+    if (!lessonMatch) continue;
+
+    const lessonNum = parseInt(lessonMatch[1]);
+
+    // Nome da aula: primeira linha não-vazia após o número, que não seja "Unidade"
+    const afterNum = part.slice(lessonMatch.index + lessonMatch[0].length);
+    let lessonName = "";
+    for (const line of afterNum.split("\n")) {
+      const t = line.trim();
+      if (t && !/^Unidade$/i.test(t)) { lessonName = t; break; }
+    }
+
+    // Conteúdo: após "Para saber mais...", antes de "Sugestão de solução"
+    const paraSaberMatch = part.match(/Para saber mais[^!]*!/i);
+    const sugestaoIdx = part.search(/Sugest[aã]o de solu[cç][aã]o/i);
+
+    let content = "";
+    if (paraSaberMatch) {
+      const titleEnd = part.indexOf("\n", paraSaberMatch.index + paraSaberMatch[0].length);
+      const start = titleEnd >= 0 ? titleEnd : paraSaberMatch.index + paraSaberMatch[0].length;
+      const end = sugestaoIdx > start ? sugestaoIdx : part.length;
+      content = part.slice(start, end).trim();
+    }
+
+    if (lessonName && content) {
+      lessons.push({ lessonNum, lessonName, content: textToMarkdown(content) });
+    }
+  }
+
+  return lessons;
+}
+
+// ---------- Publicação: renderização ----------
+let pubLessons = [];
+let pubCourseId = "";
+
+function renderPublishLessons(lessons, courseId) {
+  const container = document.getElementById("pub-lessons");
+  if (!container) return;
+  container.innerHTML = "";
+
+  lessons.forEach(lesson => {
+    const card = document.createElement("div");
+    card.className = "pub-lesson-card";
+
+    const header = document.createElement("div");
+    header.className = "pub-lesson-header";
+    header.innerHTML = `<span class="pub-lesson-num">Aula ${lesson.lessonNum}</span> <span class="pub-lesson-name">${lesson.lessonName}</span>`;
+
+    const activity = document.createElement("div");
+    activity.className = "pub-lesson-activity";
+    activity.textContent = "Para saber mais : Hora do desafio!";
+
+    const row = document.createElement("div");
+    row.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;";
+
+    const btn = document.createElement("button");
+    btn.className = "pub-btn";
+    btn.textContent = "Publicar";
+    btn.addEventListener("click", () => publishLesson(lesson, courseId, card));
+
+    const status = document.createElement("div");
+    status.className = "pub-lesson-status";
+
+    row.appendChild(btn);
+    row.appendChild(status);
+
+    card.appendChild(header);
+    card.appendChild(activity);
+    card.appendChild(row);
+    container.appendChild(card);
+  });
+
+  const pubAllBtn = document.getElementById("pub-all-btn");
+  if (pubAllBtn) pubAllBtn.style.display = lessons.length > 1 ? "" : "none";
+}
+
+async function publishLesson(lesson, courseId, card) {
+  const btn = card.querySelector(".pub-btn");
+  const status = card.querySelector(".pub-lesson-status");
+
+  btn.disabled = true;
+  status.textContent = "Publicando…";
+  status.className = "pub-lesson-status loading";
+
+  try {
+    const tab = await getActiveTab();
+    const ack = await chrome.tabs.sendMessage(tab.id, {
+      type: "ALURA_REVISOR_PUBLISH_DESAFIO_TASK",
+      courseId,
+      lessonNum: lesson.lessonNum,
+      content: lesson.content,
+    });
+
+    if (ack?.ok) {
+      status.textContent = "✅ Publicado!";
+      status.className = "pub-lesson-status ok";
+      btn.textContent = "Republicar";
+      btn.classList.add("done");
+    } else {
+      status.textContent = `❌ ${ack?.error || "Erro desconhecido"}`;
+      status.className = "pub-lesson-status error";
+    }
+  } catch (e) {
+    status.textContent = `❌ ${e.message}`;
+    status.className = "pub-lesson-status error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ---------- Publicação: leitor de .docx ----------
+
+// Extrai um arquivo do ZIP (deflate-raw ou stored) e retorna string UTF-8
+async function extractZipEntry(bytes, filename) {
+  let offset = 0;
+  while (offset < bytes.length - 30) {
+    if (bytes[offset] !== 0x50 || bytes[offset+1] !== 0x4B ||
+        bytes[offset+2] !== 0x03 || bytes[offset+3] !== 0x04) { offset++; continue; }
+    const compression  = bytes[offset+8]  | (bytes[offset+9]  << 8);
+    const compressedSz = bytes[offset+18] | (bytes[offset+19] << 8) |
+                         (bytes[offset+20] << 16) | (bytes[offset+21] << 24);
+    const filenameLen  = bytes[offset+26] | (bytes[offset+27] << 8);
+    const extraLen     = bytes[offset+28] | (bytes[offset+29] << 8);
+    const entryName    = new TextDecoder().decode(bytes.slice(offset+30, offset+30+filenameLen));
+    const dataStart    = offset + 30 + filenameLen + extraLen;
+
+    if (entryName === filename) {
+      const chunk = bytes.slice(dataStart, dataStart + compressedSz);
+      if (compression === 0) return new TextDecoder("utf-8").decode(chunk);
+      const ds = new DecompressionStream("deflate-raw");
+      const w = ds.writable.getWriter(); w.write(chunk); w.close();
+      const parts = [];
+      const r = ds.readable.getReader();
+      while (true) { const { done, value } = await r.read(); if (done) break; parts.push(value); }
+      const total = parts.reduce((a, c) => a + c.length, 0);
+      const out = new Uint8Array(total);
+      let pos = 0; for (const p of parts) { out.set(p, pos); pos += p.length; }
+      return new TextDecoder("utf-8").decode(out);
+    }
+    offset = dataStart + compressedSz;
+  }
+  return null;
+}
+
+function decodeXmlEntities(s) {
+  return s.replace(/&amp;/g,"&").replace(/&lt;/g,"<").replace(/&gt;/g,">")
+          .replace(/&quot;/g,'"').replace(/&apos;/g,"'")
+          .replace(/&#x2019;/g,"'").replace(/&#x2018;/g,"'")
+          .replace(/&#x201C;/g,'"').replace(/&#x201D;/g,'"')
+          .replace(/&#x2013;/g,"–").replace(/&#x2014;/g,"—");
+}
+
+// Converte word/document.xml em texto, preservando numeração de listas
+function parseDocumentXml(xml) {
+  const listCounters = {};
+
+  // Passo 1: percorre parágrafos via indexOf (sem regex) e injeta números de lista
+  let out = "";
+  let pos = 0;
+  while (pos < xml.length) {
+    const pOpen = xml.indexOf("<w:p", pos);
+    if (pOpen < 0) { out += xml.slice(pos); break; }
+
+    const tagClose = xml.indexOf(">", pOpen);
+    if (tagClose < 0) { out += xml.slice(pos); break; }
+
+    const pClose = xml.indexOf("</w:p>", tagClose + 1);
+    if (pClose < 0) { out += xml.slice(pos); break; }
+
+    const before  = xml.slice(pos, pOpen);
+    const openTag = xml.slice(pOpen, tagClose + 1);
+    const body    = xml.slice(tagClose + 1, pClose);
+
+    // Detecta lista numerada no corpo do parágrafo
+    const numPrStart = body.indexOf("<w:numPr>");
+    const numPrEnd   = body.indexOf("</w:numPr>");
+    let prefix = "";
+    if (numPrStart >= 0 && numPrEnd > numPrStart) {
+      const numPrBody = body.slice(numPrStart + 9, numPrEnd);
+      const numIdM = numPrBody.match(/<w:numId w:val="(\d+)"/);
+      const ilvlM  = numPrBody.match(/<w:ilvl w:val="(\d+)"/);
+      const numId  = numIdM?.[1] ?? "0";
+      const ilvl   = ilvlM?.[1]  ?? "0";
+      const key    = `${numId}:${ilvl}`;
+      listCounters[key] = (listCounters[key] ?? 0) + 1;
+      prefix = "  ".repeat(+ilvl) + listCounters[key] + ". ";
+    }
+
+    out += before + openTag + prefix + body + "</w:p>";
+    pos = pClose + 6;
+  }
+
+  // Passo 2: extração simples — quebra em </w:p> e strip de tags
+  out = out.replace(/<\/w:p>/g, "\n").replace(/<[^>]+>/g, "");
+  return decodeXmlEntities(out).replace(/\n{3,}/g, "\n\n").trim();
+}
+
+async function readDocxAsText(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const xml = await extractZipEntry(bytes, "word/document.xml");
+  if (!xml) return null;
+  return parseDocumentXml(xml);
+}
+
+// ---------- Publicação: carregar arquivo ----------
+const pubFileInput = document.getElementById("pub-file-input");
+const pubDropArea = document.getElementById("pub-drop-area");
+const pubCourseInfo = document.getElementById("pub-course-info");
+const pubCourseIdDisplay = document.getElementById("pub-course-id-display");
+const pubLessonCount = document.getElementById("pub-lesson-count");
+
+async function handleDesafioFile(file) {
+  if (!file) return;
+  const courseIdMatch = file.name.match(/\[(\d+)\]/);
+  pubCourseId = courseIdMatch?.[1] || "";
+
+  const ext = file.name.split(".").pop().toLowerCase();
+  let text = null;
+
+  if (ext === "docx") {
+    text = await readDocxAsText(file);
+    if (!text) {
+      pubCourseIdDisplay.textContent = "Erro ao ler .docx";
+      pubCourseInfo.style.display = "";
+      return;
+    }
+  } else if (ext === "doc") {
+    pubCourseIdDisplay.textContent = "Use .docx ou .txt (o formato .doc binário não é suportado)";
+    pubCourseInfo.style.display = "";
+    return;
+  } else {
+    // .txt
+    text = await file.text();
+  }
+
+  pubLessons = parseDesafioDoc(text);
+  pubCourseIdDisplay.textContent = pubCourseId || "(não encontrado no nome do arquivo)";
+  pubLessonCount.textContent = `${pubLessons.length} aula(s)`;
+  pubCourseInfo.style.display = "";
+  renderPublishLessons(pubLessons, pubCourseId);
+}
+
+if (pubFileInput) {
+  pubFileInput.addEventListener("change", (e) => handleDesafioFile(e.target.files[0]));
+}
+
+if (pubDropArea) {
+  pubDropArea.addEventListener("dragover", (e) => { e.preventDefault(); pubDropArea.classList.add("drag-over"); });
+  pubDropArea.addEventListener("dragleave", () => pubDropArea.classList.remove("drag-over"));
+  pubDropArea.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    pubDropArea.classList.remove("drag-over");
+    await handleDesafioFile(e.dataTransfer.files[0]);
+  });
+}
+
+const pubAllBtn = document.getElementById("pub-all-btn");
+if (pubAllBtn) {
+  pubAllBtn.addEventListener("click", async () => {
+    if (!pubLessons.length) return;
+    pubAllBtn.disabled = true;
+    for (const lesson of pubLessons) {
+      const card = document.querySelector(`#pub-lessons .pub-lesson-card:nth-child(${lesson.lessonNum})`);
+      if (card) await publishLesson(lesson, pubCourseId, card);
+    }
+    pubAllBtn.disabled = false;
+  });
+}
 
 // ---------- Start revisão ----------
 btn.addEventListener("click", async () => {
