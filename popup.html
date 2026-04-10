@@ -1,390 +1,396 @@
 <!doctype html>
 <html lang="pt-br">
-  <head>
-    <meta charset="utf-8" />
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <style>
-      * { box-sizing: border-box; margin: 0; padding: 0; }
-      body {
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        width: 320px;
-        background: #f5f5fa;
-        color: #1c1c1c;
-      }
-      .popup-header {
-        background: #1c1c1c;
-        padding: 14px 16px;
-      }
-      .popup-header span {
-        color: #fff;
-        font-weight: 700;
-        font-size: 14px;
-        letter-spacing: 0.2px;
-      }
-      .popup-header span em {
-        color: #00c86f;
-        font-style: normal;
-      }
 
-      /* Tab bar */
-      .tab-bar {
-        display: flex;
-        background: #f0f0f5;
-        border-bottom: 1px solid #e0e0e0;
-      }
-      .tab {
-        flex: 1;
-        padding: 10px;
-        border: none;
-        background: transparent;
-        font-size: 13px;
-        font-weight: 600;
-        color: #888;
-        cursor: pointer;
-        border-radius: 0;
-        border-bottom: 2px solid transparent;
-        font-family: inherit;
-        width: auto;
-      }
-      .tab.active {
-        color: #1c1c1c;
-        border-bottom: 2px solid #00c86f;
-        background: transparent;
-      }
-      .tab:hover:not(.active) { background: #e8e8f0; }
+<head>
+  <meta charset="utf-8" />
+  <style>
+    /* ── Cascadia Code palette ────────────────────────────────────
+       Primary:   #50DEFF  (cyan)
+       Blue:      #3D6CE2
+       Purple:    #9761FF
+       Green:     #56A145
+       Orange:    #F79722
+       Red:       #CA3328
+    ──────────────────────────────────────────────────────────── */
 
-      .popup-body { padding: 16px; }
+    @import url('https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&display=swap');
 
-      button {
-        width: 100%;
-        padding: 11px;
-        cursor: pointer;
-        border-radius: 8px;
-        font-size: 14px;
-        font-weight: 600;
-        font-family: inherit;
-        border: none;
-      }
-      #start {
-        background: #00c86f;
-        color: #fff;
-      }
-      #start:hover { background: #00a857; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
 
-      .hint { margin-top: 8px; color: #777; font-size: 12px; }
-      .status { margin-top: 8px; font-size: 12px; white-space: pre-wrap; color: #555; }
+    body {
+      font-family: 'Cascadia Code', 'Cascadia Mono', 'Fira Code', 'Consolas', monospace;
+      width: 320px;
+      background: #f0f4f8;
+      color: #0d1117;
+    }
 
-      .section-label {
-        font-size: 10px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 1px;
-        color: #aaa;
-        margin-bottom: 10px;
-        margin-top: 16px;
-      }
-      .section-label:first-child { margin-top: 0; }
+    .popup-header {
+      background: #0d1117;
+      padding: 14px 16px;
+      border-bottom: 2px solid #50DEFF;
+    }
 
-      hr.divider {
-        border: none;
-        border-top: 1px solid #e0e0e0;
-        margin: 16px 0;
-      }
+    .popup-header span {
+      color: #f0f4f8;
+      font-weight: 700;
+      font-size: 14px;
+      letter-spacing: 0.5px;
+    }
 
-      #history { margin-top: 14px; }
-      .hist-title { font-weight: 700; font-size: 12px; color: #333; margin-bottom: 4px; }
-      .hist-item { font-size: 11px; padding: 6px 0; border-bottom: 1px solid #eee; color: #444; }
-      .hist-item:last-child { border-bottom: none; }
-      .hist-id { font-weight: 700; }
-      .hist-ok { color: #00c86f; font-weight: 600; }
-      .hist-report {
-        background: none;
-        border: none;
-        color: #067ada;
-        text-decoration: underline;
-        cursor: pointer;
-        padding: 0;
-        font-size: 11px;
-        width: auto;
-        font-family: inherit;
-      }
+    .popup-header span em {
+      color: #50DEFF;
+      font-style: normal;
+    }
 
-      /* Fork */
-      #fork-url {
-        display: block;
-        width: 100%;
-        padding: 9px 12px;
-        font-size: 12px;
-        border: 1.5px solid #e0e0e0;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        font-family: inherit;
-        color: #1c1c1c;
-        background: #fff;
-        outline: none;
-      }
-      #fork-url:focus { border-color: #00c86f; }
-      #fork-btn {
-        background: #fff;
-        color: #1c1c1c;
-        border: 1.5px solid #ddd;
-        font-weight: 500;
-      }
-      #fork-btn:hover { background: #f5f5fa; }
-      #fork-status { margin-top: 8px; font-size: 12px; color: #555; }
+    /* Tab bar */
+    .tab-bar {
+      display: flex;
+      background: #e6edf3;
+      border-bottom: 1px solid #d0d7de;
+    }
 
-      /* Auditoria em lote */
-      #batch-ids {
-        display: block;
-        width: 100%;
-        padding: 9px 12px;
-        font-size: 12px;
-        border: 1.5px solid #e0e0e0;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        font-family: inherit;
-        color: #1c1c1c;
-        background: #fff;
-        resize: vertical;
-        min-height: 60px;
-        outline: none;
-      }
-      #batch-ids:focus { border-color: #00c86f; }
-      #batch-audit-btn { background: #1c1c1c; color: #fff; font-weight: 600; }
-      #batch-audit-btn:hover { background: #333; }
-      #batch-status { margin-top: 8px; font-size: 12px; color: #555; }
+    .tab {
+      flex: 1;
+      padding: 10px;
+      border: none;
+      background: transparent;
+      font-size: 13px;
+      font-weight: 600;
+      color: #57606a;
+      cursor: pointer;
+      border-radius: 0;
+      border-bottom: 2px solid transparent;
+      font-family: inherit;
+      width: auto;
+    }
 
-      /* Token GitHub */
-      #github-token {
-        display: block;
-        width: 100%;
-        padding: 9px 12px;
-        font-size: 12px;
-        border: 1.5px solid #e0e0e0;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        font-family: inherit;
-        color: #1c1c1c;
-        background: #fff;
-        outline: none;
-      }
-      #github-token:focus { border-color: #00c86f; }
-      #github-token-save-btn { background: #fff; color: #1c1c1c; border: 1.5px solid #ddd; font-weight: 500; }
-      #github-token-save-btn:hover { background: #f5f5fa; }
-      #github-token-status { margin-top: 8px; font-size: 12px; color: #555; }
+    .tab.active {
+      color: #0d1117;
+      border-bottom: 2px solid #50DEFF;
+      background: transparent;
+    }
 
-      /* Token video-uploader */
-      #uploader-token {
-        display: block;
-        width: 100%;
-        padding: 9px 12px;
-        font-size: 12px;
-        border: 1.5px solid #e0e0e0;
-        border-radius: 8px;
-        margin-bottom: 8px;
-        font-family: inherit;
-        color: #1c1c1c;
-        background: #fff;
-        outline: none;
-      }
-      #uploader-token:focus { border-color: #00c86f; }
-      #uploader-token-save-btn { background: #fff; color: #1c1c1c; border: 1.5px solid #ddd; font-weight: 500; }
-      #uploader-token-save-btn:hover { background: #f5f5fa; }
-      #uploader-token-status { margin-top: 8px; font-size: 12px; color: #555; }
+    .tab:hover:not(.active) {
+      background: #d8e3ee;
+    }
 
-      /* Em breve */
-      .soon-list { display: flex; flex-direction: column; gap: 6px; }
-      .soon-item {
-        padding: 9px 12px;
-        border-radius: 8px;
-        font-size: 12px;
-        color: #bbb;
-        background: #f9f9f9;
-        border: 1.5px dashed #e0e0e0;
-        position: relative;
-        padding-right: 72px;
-      }
-      .soon-item::after {
-        content: "Em breve";
-        position: absolute;
-        right: 10px;
-        top: 50%;
-        transform: translateY(-50%);
-        font-size: 9px;
-        font-weight: 700;
-        color: #ccc;
-        text-transform: uppercase;
-        letter-spacing: 0.5px;
-      }
-      .update-banner {
-        display: none;
-        background: #fff3e0;
-        border-bottom: 1px solid #ffb74d;
-        padding: 8px 12px;
-        font-size: 12px;
-        color: #e65100;
-        flex-direction: column;
-        gap: 6px;
-      }
-      .update-banner.visible { display: flex; }
-      .update-banner span { line-height: 1.4; }
-      .update-banner button {
-        background: #e65100;
-        color: #fff;
-        border: none;
-        border-radius: 6px;
-        padding: 6px 10px;
-        font-size: 12px;
-        font-family: inherit;
-        cursor: pointer;
-        align-self: flex-start;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="popup-header">
-      <span>Alura <em>Revisor</em></span>
-    </div>
-    <div class="update-banner" id="update-banner">
-      <span id="update-banner-text">Nova versão disponível!</span>
-      <span style="font-size:11px;color:#bf360c;">Extraia o ZIP na pasta da extensão e clique em Recarregar no Chrome.</span>
-      <button id="btn-baixar-atualizacao">Baixar atualização</button>
-    </div>
-    <div class="tab-bar">
-      <button class="tab active" id="tab-review-btn">Revisão</button>
-      <button class="tab" id="tab-tools-btn">Ferramentas</button>
-    </div>
-    <div class="popup-body">
+    .popup-body {
+      padding: 16px;
+    }
 
-      <!-- ABA: Revisão -->
-      <div id="tab-review">
-        <div id="product-type-selector" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
-          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio" name="productType" value="tecnico" checked> Curso Técnico</label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio" name="productType" value="efaf"> EFAF</label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio" name="productType" value="em"> EM</label>
-          <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio" name="productType" value="efai"> EFAI</label>
-        </div>
-        <button id="start">Start revisão</button>
-        <div class="hint">Abra a Home do curso e clique no botão desejado.</div>
-        <div id="status" class="status"></div>
-        <div id="history"></div>
+    button {
+      width: 100%;
+      padding: 11px;
+      cursor: pointer;
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 600;
+      font-family: inherit;
+      border: none;
+    }
+
+    #start {
+      background: #50DEFF;
+      color: #0d1117;
+    }
+
+    #start:hover {
+      background: #29c9f0;
+    }
+
+    .hint {
+      margin-top: 8px;
+      color: #57606a;
+      font-size: 12px;
+    }
+
+    .status {
+      margin-top: 8px;
+      font-size: 12px;
+      white-space: pre-wrap;
+      color: #444d56;
+    }
+
+    .section-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #9761FF;
+      margin-bottom: 10px;
+      margin-top: 16px;
+    }
+
+    .section-label:first-child {
+      margin-top: 0;
+    }
+
+    hr.divider {
+      border: none;
+      border-top: 1px solid #d0d7de;
+      margin: 16px 0;
+    }
+
+    #history {
+      margin-top: 14px;
+    }
+
+    .hist-title {
+      font-weight: 700;
+      font-size: 12px;
+      color: #0d1117;
+      margin-bottom: 4px;
+    }
+
+    .hist-item {
+      font-size: 11px;
+      padding: 6px 0;
+      border-bottom: 1px solid #d0d7de;
+      color: #444d56;
+    }
+
+    .hist-item:last-child {
+      border-bottom: none;
+    }
+
+    .hist-id {
+      font-weight: 700;
+    }
+
+    .hist-ok {
+      color: #56A145;
+      font-weight: 600;
+    }
+
+    .hist-report {
+      background: none;
+      border: none;
+      color: #3D6CE2;
+      text-decoration: underline;
+      cursor: pointer;
+      padding: 0;
+      font-size: 11px;
+      width: auto;
+      font-family: inherit;
+    }
+
+    /* Inputs genéricos */
+    input[type="text"],
+    input[type="password"],
+    textarea {
+      display: block;
+      width: 100%;
+      padding: 9px 12px;
+      font-size: 12px;
+      border: 1.5px solid #d0d7de;
+      border-radius: 8px;
+      margin-bottom: 8px;
+      font-family: inherit;
+      color: #0d1117;
+      background: #fff;
+      outline: none;
+    }
+
+    input[type="text"]:focus,
+    input[type="password"]:focus,
+    textarea:focus {
+      border-color: #50DEFF;
+      box-shadow: 0 0 0 2px rgba(80,222,255,0.18);
+    }
+
+    /* Auditoria em lote */
+    #batch-ids {
+      resize: vertical;
+      min-height: 60px;
+    }
+
+    #batch-audit-btn {
+      background: #0d1117;
+      color: #50DEFF;
+      font-weight: 600;
+      border: 1.5px solid #50DEFF;
+    }
+
+    #batch-audit-btn:hover {
+      background: #161b22;
+    }
+
+    #batch-status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #444d56;
+    }
+
+    /* Token GitHub */
+    #github-token-save-btn {
+      background: #fff;
+      color: #0d1117;
+      border: 1.5px solid #d0d7de;
+      font-weight: 500;
+    }
+
+    #github-token-save-btn:hover {
+      background: #e6edf3;
+    }
+
+    #github-token-status {
+      margin-top: 8px;
+      font-size: 12px;
+      color: #444d56;
+    }
+
+    /* Em breve */
+    .soon-list {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .soon-item {
+      padding: 9px 12px;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #9761FF;
+      background: #f6f2ff;
+      border: 1.5px dashed #c9b8ff;
+      position: relative;
+      padding-right: 72px;
+      opacity: 0.7;
+    }
+
+    .soon-item::after {
+      content: "Em breve";
+      position: absolute;
+      right: 10px;
+      top: 50%;
+      transform: translateY(-50%);
+      font-size: 9px;
+      font-weight: 700;
+      color: #9761FF;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .update-banner {
+      display: none;
+      background: #fff8e1;
+      border-bottom: 2px solid #F79722;
+      padding: 8px 12px;
+      font-size: 12px;
+      color: #b35900;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .update-banner.visible {
+      display: flex;
+    }
+
+    .update-banner span {
+      line-height: 1.4;
+    }
+
+    .update-banner button {
+      background: #F79722;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-family: inherit;
+      cursor: pointer;
+      align-self: flex-start;
+    }
+
+    footer a {
+      color: #3D6CE2 !important;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="popup-header">
+    <span>Start <em>Revisor</em></span>
+  </div>
+  <div class="update-banner" id="update-banner">
+    <span id="update-banner-text">Nova versão disponível!</span>
+    <span style="font-size:11px;color:#bf360c;">Extraia o ZIP na pasta da extensão e clique em Recarregar no
+      Chrome.</span>
+    <button id="btn-baixar-atualizacao">Baixar atualização</button>
+  </div>
+  <div class="tab-bar">
+    <button class="tab active" id="tab-review-btn">Revisão</button>
+    <button class="tab" id="tab-tools-btn">Ferramentas</button>
+  </div>
+  <div class="popup-body">
+
+    <!-- ABA: Revisão -->
+    <div id="tab-review">
+      <div id="product-type-selector" style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:10px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
+            name="productType" value="tecnico" checked> Curso Técnico</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
+            name="productType" value="efaf"> EFAF</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
+            name="productType" value="em"> EM</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
+            name="productType" value="efai"> EFAI</label>
       </div>
+      <button id="start">Start revisão</button>
+      <div class="hint">Abra a Home do curso e clique no botão desejado.</div>
+      <div id="status" class="status"></div>
+      <div id="history"></div>
+    </div>
 
-      <!-- ABA: Ferramentas -->
-      <div id="tab-tools" style="display:none">
+    <!-- ABA: Ferramentas -->
+    <div id="tab-tools" style="display:none">
 
-        <div class="section-label">Fork → alura-cursos</div>
-        <input id="fork-url" type="text" placeholder="https://github.com/instrutor/repo">
-        <button id="fork-btn">Fazer Fork</button>
-        <div id="fork-status"></div>
+      <div class="section-label">Token GitHub</div>
+      <input id="github-token" type="password" placeholder="Cole o Personal Access Token aqui" autocomplete="off">
+      <button id="github-token-save-btn">Salvar token</button>
+      <div id="github-token-status"></div>
 
-        <div class="section-label">Token GitHub</div>
-        <input id="github-token" type="password" placeholder="Cole o Personal Access Token aqui" autocomplete="off">
-        <button id="github-token-save-btn">Salvar token</button>
-        <div id="github-token-status"></div>
+      <hr class="divider">
 
-        <hr class="divider">
-
-        <div class="section-label">Auditoria de transcrições e legendagens</div>
-        <textarea id="batch-ids" placeholder="1678, 2262, 2667, 4319, ..."></textarea>
-        <div style="display:flex;flex-direction:column;gap:6px;margin:8px 0 8px;">
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-            <input type="checkbox" id="audit-transcription" checked> Transcrição
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-            <input type="checkbox" id="audit-pt"> Legendas em PT
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-            <input type="checkbox" id="audit-esp"> Legendas em ESP
-          </label>
-          <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
-            <input type="checkbox" id="audit-download-textual"> Download textual
-          </label>
-        </div>
-        <button id="batch-audit-btn">Auditar lista</button>
-        <div id="batch-status"></div>
-
-        <hr class="divider">
-
-        <div class="section-label">Dropbox</div>
-        <input id="dropbox-client-id" type="text" placeholder="App Key (Client ID) do Dropbox"
-          style="display:block;width:100%;padding:9px 12px;font-size:12px;border:1.5px solid #e0e0e0;border-radius:8px;margin-bottom:8px;font-family:inherit;color:#1c1c1c;background:#fff;outline:none;">
-        <div id="dropbox-redirect-hint" style="font-size:11px;color:#888;margin-bottom:8px;display:none;">
-          Adicione este URI no app Dropbox → OAuth 2 → Redirect URIs:<br>
-          <span id="dropbox-redirect-uri" style="font-weight:600;color:#1c1c1c;word-break:break-all;"></span>
-        </div>
-        <div style="display:flex;gap:8px;">
-          <button id="dropbox-connect-btn" style="flex:1;background:#0061fe;color:#fff;font-weight:600;">Conectar Dropbox</button>
-          <button id="dropbox-disconnect-btn" style="flex:1;background:#fff;color:#e53935;border:1.5px solid #e53935;font-weight:600;display:none;">Desconectar</button>
-        </div>
-        <div id="dropbox-auth-status" style="margin-top:8px;font-size:12px;color:#555;"></div>
-
-        <hr class="divider">
-
-        <div class="section-label">Vídeos do curso</div>
-        <div class="hint" style="margin-bottom:8px;margin-top:0">Abra a Home do curso antes de usar.</div>
-        <button id="btnDownload" style="background:#1c1c1c; color:#fff;">Baixar vídeos do curso</button>
-        <button id="btnUpload" style="margin-top:8px; background:#067ada; color:#fff;">Subir vídeos do curso</button>
-
-        <div class="section-label">Token video-uploader</div>
-        <input id="uploader-token" type="password" placeholder="Cole o X-API-TOKEN aqui">
-        <button id="uploader-token-save-btn">Salvar token</button>
-        <div id="uploader-token-status"></div>
-
-        <hr class="divider">
-
-        <div class="section-label">Baixar atividades traduzidas</div>
-        <button id="btnDownloadTranslated" style="background:#5a2d82; color:#fff;">Baixar atividades traduzidas</button>
-        <div id="download-translated-status" style="margin-top:6px;font-size:12px;color:#555;white-space:pre-wrap;"></div>
-        <div id="json-ready-indicator" style="display:none;margin-top:6px;font-size:11px;color:#2e7d32;background:#e8f5e9;border-radius:6px;padding:5px 8px;">
-          ✓ JSON pronto: <strong id="json-ready-course"></strong> — <span id="json-ready-count"></span> atividades
-        </div>
-
-        <hr class="divider">
-
-        <div class="section-label">Renomear Seções com IA</div>
-        <div class="hint" style="margin-bottom:8px;margin-top:0">Renomeia seções genéricas ("Aula 1", "Aula 2"...) com títulos descritivos gerados via Amazon Titan. Abra a Home do curso antes de usar.</div>
-        <button id="rename-sections-btn" style="background:#1c1c1c; color:#fff; font-weight:600;">Renomear Seções</button>
-        <div id="rename-sections-status" style="margin-top:8px;font-size:12px;color:#555;white-space:pre-wrap;"></div>
-
-        <div class="section-label">Credenciais AWS (Bedrock)</div>
-        <input id="aws-access-key" type="password" placeholder="Access Key ID" autocomplete="off"
-          style="display:block;width:100%;padding:9px 12px;font-size:12px;border:1.5px solid #e0e0e0;border-radius:8px;margin-bottom:6px;font-family:inherit;color:#1c1c1c;background:#fff;outline:none;">
-        <input id="aws-secret-key" type="password" placeholder="Secret Access Key" autocomplete="off"
-          style="display:block;width:100%;padding:9px 12px;font-size:12px;border:1.5px solid #e0e0e0;border-radius:8px;margin-bottom:6px;font-family:inherit;color:#1c1c1c;background:#fff;outline:none;">
-        <input id="aws-region" type="text" placeholder="Região (ex: us-east-1)" value="us-east-1"
-          style="display:block;width:100%;padding:9px 12px;font-size:12px;border:1.5px solid #e0e0e0;border-radius:8px;margin-bottom:8px;font-family:inherit;color:#1c1c1c;background:#fff;outline:none;">
-        <button id="aws-creds-save-btn" style="background:#fff;color:#1c1c1c;border:1.5px solid #ddd;font-weight:500;">Salvar credenciais</button>
-        <div id="aws-creds-status" style="margin-top:8px;font-size:12px;color:#555;"></div>
-
-        <hr class="divider">
-
-        <div class="section-label">Upload ícone Start</div>
-        <div class="hint" style="margin-bottom:8px;margin-top:0">Abra a Home do curso Start antes de usar.</div>
-        <button id="start-icon-btn" style="background:#f57c00; color:#fff; font-weight:600;">Upload ícone Start</button>
-        <div id="start-icon-status" style="margin-top:6px;font-size:12px;color:#555;white-space:pre-wrap;"></div>
-
-        <hr class="divider">
-
-        <div class="section-label">Em breve</div>
-        <div class="soon-list">
-          <div class="soon-item">Upload de ícones customizados</div>
-          <div class="soon-item">Adicionar transcrição em um só vídeo</div>
-          <div class="soon-item">Adicionar legenda em um só vídeo</div>
-          <div class="soon-item">Duplicar cursos</div>
-        </div>
-
+      <div class="section-label">Auditoria de transcrições e legendagens</div>
+      <textarea id="batch-ids" placeholder="1678, 2262, 2667, 4319, ..."></textarea>
+      <div style="display:flex;flex-direction:column;gap:6px;margin:8px 0 8px;">
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="audit-transcription" checked> Transcrição
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="audit-pt"> Legendas em PT
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="audit-esp"> Legendas em ESP
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;font-size:13px;cursor:pointer;">
+          <input type="checkbox" id="audit-download-textual"> Download textual
+        </label>
       </div>
+      <button id="batch-audit-btn">Auditar lista</button>
+      <div id="batch-status"></div>
+
+      <hr class="divider">
+
+      <div class="section-label">Upload ícone Start</div>
+      <div class="hint" style="margin-bottom:8px;margin-top:0">Abra a Home do curso Start antes de usar.</div>
+      <button id="start-icon-btn" style="background:#F79722; color:#0d1117; font-weight:600;">Upload ícone Start</button>
+      <div id="start-icon-status" style="margin-top:6px;font-size:12px;color:#444d56;white-space:pre-wrap;"></div>
+
+      <hr class="divider">
+
 
     </div>
-    <footer style="text-align:center;padding:10px 16px;border-top:1px solid #e0e0e0;background:#f5f5fa;">
-      <a href="https://github.com/efops-conteudo-alura/alura-revisor-conteudo?tab=readme-ov-file#alura-revisor-de-conte%C3%BAdo" target="_blank"
-         style="font-size:11px;color:#067ada;text-decoration:none;font-family:inherit;">
-        Acesse a documentação da ferramenta aqui
-      </a>
-    </footer>
-    <script src="popup.js"></script>
-  </body>
+
+  </div>
+  <footer style="text-align:center;padding:10px 16px;border-top:1px solid #d0d7de;background:#e6edf3;">
+  </footer>
+  <script src="popup.js"></script>
+</body>
+
 </html>
