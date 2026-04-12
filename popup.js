@@ -252,6 +252,15 @@ if (githubTokenSaveBtn) {
   });
 }
 
+// Intercepta links com data-open-tab para abrir sem fechar o popup
+document.addEventListener("click", e => {
+  const a = e.target.closest("a[data-open-tab]");
+  if (!a) return;
+  e.preventDefault();
+  e.stopPropagation();
+  chrome.tabs.create({ url: a.dataset.openTab, active: false });
+});
+
 // ---------- Desativar atividades em lote ----------
 const deactCourseIdEl  = document.getElementById("deact-course-id");
 const deactFetchBtn    = document.getElementById("deact-fetch-btn");
@@ -263,6 +272,14 @@ const deactSelectAllBtn= document.getElementById("deact-select-all-btn");
 const deactCountEl     = document.getElementById("deact-count");
 
 let deactAllTasks = [];
+
+// Restaura lista ao reabrir o popup
+chrome.storage.session.get("deactState", ({ deactState }) => {
+  if (!deactState) return;
+  deactCourseIdEl.value = deactState.courseId;
+  deactStatusEl.textContent = deactState.status;
+  renderDeactList(deactState.sections);
+});
 
 function updateDeactCount() {
   const checked = deactListEl.querySelectorAll("input[type='checkbox']:checked").length;
@@ -300,6 +317,16 @@ function renderDeactList(sections) {
 
       item.appendChild(cb);
       item.appendChild(lbl);
+
+      if (task.activityUrl) {
+        const link = document.createElement("a");
+        link.href = task.activityUrl;
+        link.title = "Ver atividade";
+        link.textContent = "↗";
+        link.dataset.openTab = task.activityUrl;
+        link.style.cssText = "color:#3D6CE2;text-decoration:none;font-size:10px;flex-shrink:0;";
+        item.appendChild(link);
+      }
       deactListEl.appendChild(item);
     });
   });
@@ -346,6 +373,7 @@ deactFetchBtn?.addEventListener("click", async () => {
     const total = sectionsWithTasks.reduce((a, s) => a + s.tasks.length, 0);
     deactStatusEl.textContent = `${total} atividade(s) encontrada(s).`;
     renderDeactList(sectionsWithTasks);
+    chrome.storage.session.set({ deactState: { courseId, sections: sectionsWithTasks, status: `${total} atividade(s) encontrada(s).` } });
   } catch (e) {
     deactStatusEl.textContent = `Erro: ${e.message}`;
   } finally {
@@ -389,6 +417,7 @@ deactConfirmBtn?.addEventListener("click", async () => {
   deactStatusEl.textContent = `✅ ${done} atividade(s) desativada(s).`;
   deactConfirmBtn.disabled = false;
   updateDeactCount();
+  chrome.storage.session.remove("deactState");
 });
 
 // ---------- Tab switching ----------
@@ -750,6 +779,247 @@ if (pubAllBtn) {
       if (card) await publishLesson(lesson, pubCourseId, card);
     }
     pubAllBtn.disabled = false;
+  });
+}
+
+// ---------- Faça como eu fiz: parsing ----------
+
+// Marcadores de seções — SEM flag 'i': cabeçalhos no doc são CAIXA ALTA,
+// evita falso match com nomes de aula em caixa mista ("Preparando o ambiente")
+const FEZ_SECTION_MARKERS = [
+  { re: /^PREPARANDO\s+O\s+AMBIENTE/m,   type: "PREP",     name: "Preparando o ambiente" },
+  { re: /^FA[ÇC]A\s+COMO\s+EU\s+FIZ/m,  type: "FEZ",      name: "Faça como eu fiz" },
+  { re: /^Opini[aã]o\s*$/m,             type: "OPINION",  name: "Opinião" },
+  { re: /^PARA\s+SABER\s+MAIS/m,         type: "PSM",      name: "Para saber mais" },
+  { re: /^Gloss[aá]rio\s*$/m,           type: "GLOSSARIO",name: "Glossário" },
+  { re: /^COMPARTILHE\s+SEU\s+PROJETO/m, type: "SKIP",     name: "" },
+];
+
+function parseFezDoc(text) {
+  text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  const lessons = [];
+
+  // Divide no início de cada linha "Aula N"
+  const parts = text.split(/(?=^Aula\s+\d+)/m);
+
+  for (const part of parts) {
+    // Aceita: "Aula 1 – Nome", "Aula 1 - Nome", "Aula 1Nome" (qualquer separador)
+    const lessonMatch = part.match(/^Aula\s+(\d+)(?:\s*[-–—]\s*|\s+)(.+)?/m);
+    if (!lessonMatch) continue;
+
+    const lessonNum  = parseInt(lessonMatch[1]);
+    const lessonName = (lessonMatch[2] || "").trim();
+
+    // Encontra a PRIMEIRA ocorrência de cada marcador (evita falsos positivos no corpo)
+    const found = [];
+    for (const marker of FEZ_SECTION_MARKERS) {
+      // Usa as flags do próprio regex (sem 'g') — só a primeira ocorrência
+      const m = part.match(marker.re);
+      if (m) {
+        found.push({ type: marker.type, name: marker.name, start: m.index, end: m.index + m[0].length });
+      }
+    }
+    found.sort((a, b) => a.start - b.start);
+
+    // Extrai conteúdo entre marcadores
+    const activities = [];
+    for (let i = 0; i < found.length; i++) {
+      if (found[i].type === "SKIP") continue;
+
+      // Pula até a próxima linha depois do cabeçalho (ex: "PREPARANDO O AMBIENTE\n...")
+      const lineEnd      = part.indexOf("\n", found[i].end);
+      const contentStart = lineEnd >= 0 ? lineEnd + 1 : found[i].end;
+      // Vai até o início do próximo marcador
+      const contentEnd   = i + 1 < found.length ? found[i + 1].start : part.length;
+      const rawContent   = part.slice(contentStart, contentEnd).trim();
+
+      if (found[i].type === "OPINION") {
+        // Anexa à última atividade FEZ como campo "Opinião"
+        const lastFez = [...activities].reverse().find(a => a.type === "FEZ");
+        if (lastFez) lastFez.opinion = textToMarkdown(rawContent);
+      } else {
+        activities.push({
+          type:    found[i].type,
+          name:    found[i].name,
+          content: textToMarkdown(rawContent),
+          opinion: "",
+        });
+      }
+    }
+
+    if (activities.length > 0) {
+      lessons.push({ lessonNum, lessonName, activities });
+    }
+  }
+  return lessons;
+}
+
+// ---------- Faça como eu fiz: renderização ----------
+let fezLessons  = [];
+let fezCourseId = "";
+
+function renderFezLessons(lessons, courseId) {
+  const container = document.getElementById("fez-lessons");
+  if (!container) return;
+  container.innerHTML = "";
+
+  lessons.forEach(lesson => {
+    const card = document.createElement("div");
+    card.className = "pub-lesson-card";
+
+    const header = document.createElement("div");
+    header.className = "pub-lesson-header";
+    header.innerHTML = `<span class="pub-lesson-num">Aula ${lesson.lessonNum}</span> <span class="pub-lesson-name">${lesson.lessonName}</span>`;
+    card.appendChild(header);
+
+    lesson.activities.forEach(act => {
+      const actRow = document.createElement("div");
+      actRow.style.cssText = "display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:6px;";
+
+      const actLabel = document.createElement("div");
+      actLabel.className = "pub-lesson-activity";
+      actLabel.textContent = act.name;
+      actLabel.style.flexShrink = "0";
+
+      const btn = document.createElement("button");
+      btn.className = "pub-btn";
+      btn.textContent = "Publicar";
+
+      const status = document.createElement("div");
+      status.className = "pub-lesson-status";
+
+      btn.addEventListener("click", () => publishActivity(act, lesson.lessonNum, courseId, btn, status));
+
+      actRow.appendChild(actLabel);
+      actRow.appendChild(btn);
+      actRow.appendChild(status);
+      card.appendChild(actRow);
+    });
+
+    container.appendChild(card);
+  });
+
+  const totalActivities = lessons.reduce((s, l) => s + l.activities.length, 0);
+  const fezAllBtn = document.getElementById("fez-all-btn");
+  if (fezAllBtn) fezAllBtn.style.display = totalActivities > 1 ? "" : "none";
+}
+
+async function publishActivity(act, lessonNum, courseId, btn, status) {
+  btn.disabled = true;
+  status.textContent = "Publicando…";
+  status.className = "pub-lesson-status loading";
+
+  try {
+    const tab = await getActiveTab();
+    const ack = await chrome.tabs.sendMessage(tab.id, {
+      type: "ALURA_REVISOR_PUBLISH_ACTIVITY",
+      activityType: act.type,
+      activityName: act.name,
+      courseId,
+      lessonNum,
+      content: act.content,
+      opinion: act.opinion || "",
+    });
+
+    if (ack?.ok) {
+      status.textContent = "✅ Publicado!";
+      status.className = "pub-lesson-status ok";
+      btn.textContent = "Republicar";
+      btn.classList.add("done");
+    } else {
+      status.textContent = `❌ ${ack?.error || "Erro desconhecido"}`;
+      status.className = "pub-lesson-status error";
+    }
+  } catch (e) {
+    status.textContent = `❌ ${e.message}`;
+    status.className = "pub-lesson-status error";
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ---------- Faça como eu fiz: carregar arquivo ----------
+const fezFileInput    = document.getElementById("fez-file-input");
+const fezDropArea     = document.getElementById("fez-drop-area");
+const fezCourseInfo   = document.getElementById("fez-course-info");
+const fezCourseIdDisp = document.getElementById("fez-course-id-display");
+const fezLessonCount  = document.getElementById("fez-lesson-count");
+
+async function handleFezFile(file) {
+  if (!file) return;
+  const courseIdMatch = file.name.match(/\[(\d+)\]/);
+  fezCourseId = courseIdMatch?.[1] || "";
+
+  const ext = file.name.split(".").pop().toLowerCase();
+  let text = null;
+  if (ext === "docx") {
+    text = await readDocxAsText(file);
+    if (!text) { fezCourseIdDisp.textContent = "Erro ao ler .docx"; fezCourseInfo.style.display = ""; return; }
+  } else if (ext === "doc") {
+    fezCourseIdDisp.textContent = "Use .docx ou .txt";
+    fezCourseInfo.style.display = "";
+    return;
+  } else {
+    text = await file.text();
+  }
+
+  fezLessons = parseFezDoc(text);
+
+  // DEBUG — mostra direto no popup
+  const fezDebugEl = document.getElementById("fez-debug");
+  if (fezDebugEl) {
+    if (fezLessons.length === 0) {
+      fezDebugEl.textContent = "⚠️ Nenhuma aula encontrada.\n\nPrimeiros 500 chars:\n" + text.slice(0, 500);
+    } else {
+      let log = "";
+      for (const lesson of fezLessons) {
+        log += `── Aula ${lesson.lessonNum} ${lesson.lessonName}\n`;
+        for (const act of lesson.activities) {
+          log += `   [${act.type}] ${act.name}\n`;
+          log += `   ${act.content.slice(0, 150).replace(/\n/g, " ")}${act.content.length > 150 ? "…" : ""}\n`;
+          if (act.opinion) log += `   [opinião] ${act.opinion.slice(0, 100)}…\n`;
+        }
+      }
+      fezDebugEl.textContent = log;
+    }
+    fezDebugEl.style.display = "";
+  }
+
+  fezCourseIdDisp.textContent = fezCourseId || "(não encontrado no nome do arquivo)";
+  fezLessonCount.textContent  = `${fezLessons.length} aula(s)`;
+  fezCourseInfo.style.display = "";
+  renderFezLessons(fezLessons, fezCourseId);
+}
+
+if (fezFileInput) fezFileInput.addEventListener("change", (e) => handleFezFile(e.target.files[0]));
+
+if (fezDropArea) {
+  fezDropArea.addEventListener("dragover", (e) => { e.preventDefault(); fezDropArea.classList.add("drag-over"); });
+  fezDropArea.addEventListener("dragleave", () => fezDropArea.classList.remove("drag-over"));
+  fezDropArea.addEventListener("drop", async (e) => {
+    e.preventDefault(); fezDropArea.classList.remove("drag-over");
+    await handleFezFile(e.dataTransfer.files[0]);
+  });
+}
+
+const fezAllBtn = document.getElementById("fez-all-btn");
+if (fezAllBtn) {
+  fezAllBtn.addEventListener("click", async () => {
+    if (!fezLessons.length) return;
+    fezAllBtn.disabled = true;
+    const container = document.getElementById("fez-lessons");
+    const allBtns = container ? [...container.querySelectorAll(".pub-btn")] : [];
+    const allStatuses = container ? [...container.querySelectorAll(".pub-lesson-status")] : [];
+    let idx = 0;
+    for (const lesson of fezLessons) {
+      for (const act of lesson.activities) {
+        const btn    = allBtns[idx]    || document.createElement("button");
+        const status = allStatuses[idx] || document.createElement("div");
+        await publishActivity(act, lesson.lessonNum, fezCourseId, btn, status);
+        idx++;
+      }
+    }
+    fezAllBtn.disabled = false;
   });
 }
 

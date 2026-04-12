@@ -3051,6 +3051,16 @@
     return true;
   });
 
+  // ---------- Publicação: Faça como eu fiz via popup ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_PUBLISH_FEZ_TASK") return;
+    (async () => {
+      try { sendResponse(await sendToBackground(msg)); }
+      catch (e) { sendResponse({ ok: false, error: e.message }); }
+    })();
+    return true;
+  });
+
   // ---------- Publicação: Desafio via popup ----------
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type !== "ALURA_REVISOR_PUBLISH_DESAFIO_TASK") return;
@@ -3064,6 +3074,16 @@
       }
     })();
 
+    return true;
+  });
+
+  // ---------- Publicação: atividade unificada (PREP/FEZ/PSM/GLOSSARIO) ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_PUBLISH_ACTIVITY") return;
+    (async () => {
+      try { sendResponse(await sendToBackground(msg)); }
+      catch (e) { sendResponse({ ok: false, error: e.message }); }
+    })();
     return true;
   });
 

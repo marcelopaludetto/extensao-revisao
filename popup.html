@@ -544,13 +544,13 @@
     .pub-lesson-status.error { color: #CA3328; }
     .pub-lesson-status.loading { color: #F79722; }
 
-    #pub-all-btn {
+    #pub-all-btn, #fez-all-btn {
       background: #9761FF;
       color: #fff;
       margin-top: 4px;
     }
 
-    #pub-all-btn:hover {
+    #pub-all-btn:hover, #fez-all-btn:hover {
       background: #7c4de8;
     }
   </style>
@@ -678,6 +678,27 @@
 
       <button id="pub-all-btn" style="display:none">Publicar todas as aulas</button>
       <div id="pub-global-status" style="margin-top:8px;font-size:12px;color:#444d56;"></div>
+
+      <hr class="divider">
+
+      <div class="section-label">Faça como eu fiz</div>
+
+      <label class="pub-drop-area" id="fez-drop-area" for="fez-file-input">
+        <input type="file" id="fez-file-input" accept=".txt,.docx,.doc">
+        <span>📄 Arraste ou clique para selecionar o <strong>.txt/.docx</strong></span>
+      </label>
+
+      <div class="pub-course-info" id="fez-course-info" style="display:none">
+        Curso <strong id="fez-course-id-display">-</strong>
+        &middot;
+        <span id="fez-lesson-count"></span>
+      </div>
+
+      <div id="fez-lessons"></div>
+
+      <button id="fez-all-btn" style="display:none">Publicar todas as aulas</button>
+
+      <pre id="fez-debug" style="display:none;font-size:10px;background:#1e1e1e;color:#d4d4d4;padding:8px;border-radius:6px;max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-top:8px;"></pre>
 
     </div>
 

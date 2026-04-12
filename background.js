@@ -541,7 +541,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             title: tr.cells[2]?.textContent?.trim() ?? "",
             active: !tr.classList.contains("danger"),
             editUrl: tr.querySelector("a[href*='/task/edit/']")?.href ?? "",
-            activityUrl: tr.querySelector("a[href*='/course/']:not([href*='/admin/'])")?.href ?? ""
+            activityUrl: tr.querySelector("a[href*='/course/'][href*='/task/']:not([href*='/admin/'])")?.href ?? ""
           })).filter(t => t.id);
 
           const hasActive = allTasks.some(t => t.active);
@@ -566,7 +566,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (result.reordered) {
         await new Promise(resolve => setTimeout(resolve, 1500));
       }
-      sendResponse({ ok: true, tasks: result.tasks, reordered: result.reordered });
+      const tasksWithAdminUrl = result.tasks.map(t => {
+        const taskId = t.editUrl.match(/\/task\/edit\/(\d+)/)?.[1];
+        return {
+          ...t,
+          activityUrl: taskId
+            ? `${baseUrl}/admin/course/v2/${msg.courseId}/section/${msg.sectionId}/task/edit/${taskId}`
+            : t.activityUrl
+        };
+      });
+      sendResponse({ ok: true, tasks: tasksWithAdminUrl, reordered: result.reordered });
     } catch (e) {
       sendResponse({ ok: false, error: e?.message || String(e), tasks: [] });
     } finally {
@@ -1505,6 +1514,141 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
+// ---------- Publicação: Faça como eu fiz ----------
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_PUBLISH_FEZ_TASK") return;
+
+  (async () => {
+    let tabId;
+    try {
+      const baseUrl = "https://cursos.alura.com.br";
+
+      // 1. Busca seções e pega o sectionId da aula
+      const sectionsUrl = `${baseUrl}/admin/courses/v2/${msg.courseId}/sections`;
+      tabId = await openTab(sectionsUrl);
+
+      let sections = [];
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(r => setTimeout(r, 800));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            const rows = document.querySelectorAll("#sectionIds tbody tr");
+            if (!rows.length) return null;
+            return [...rows].map(tr => ({ id: tr.id, title: tr.cells[2]?.textContent?.trim() ?? "" })).filter(s => s.id);
+          }
+        });
+        if (res?.[0]?.result?.length) { sections = res[0].result; break; }
+      }
+
+      const section = sections[msg.lessonNum - 1];
+      if (!section?.id) { sendResponse({ ok: false, error: `Seção da Aula ${msg.lessonNum} não encontrada.` }); return; }
+
+      // 2. Navegar para criação de atividade
+      const createUrl = `${baseUrl}/admin/course/v2/${msg.courseId}/section/${section.id}/task/create`;
+      await chrome.tabs.update(tabId, { url: createUrl });
+
+      // Aguarda #chooseTask
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector("#chooseTask") });
+        if (res?.[0]?.result) break;
+      }
+
+      // 3. Seleciona "Faça como eu fiz na aula" (value="3")
+      const clicked = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const option = document.querySelector('option[data-tag="DO_AFTER_ME"]');
+          if (!option) return { ok: false, error: "opção não encontrada" };
+          const select = option.closest("select");
+          if (!select) return { ok: false, error: "select não encontrado" };
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          return { ok: true };
+        }
+      });
+      if (!clicked?.[0]?.result?.ok) { sendResponse({ ok: false, error: clicked?.[0]?.result?.error || "Erro ao selecionar tipo" }); return; }
+
+      // 4. Aguarda formulário (campo título + editores)
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => !!(document.querySelector("#task\\.title") && document.querySelector("#text .CodeMirror"))
+        });
+        if (res?.[0]?.result) break;
+      }
+
+      // 5. Preenche título
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => {
+          const el = document.getElementById("task.title") || document.querySelector('input[name="title"]');
+          if (el) { el.value = "Faça como eu fiz"; el.dispatchEvent(new Event("input", { bubbles: true })); }
+        }
+      });
+
+      // 6. Função auxiliar: copia para clipboard e cola no CodeMirror indicado
+      async function pasteIntoEditor(selector, content) {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (sel, text) => {
+            const cmEl = document.querySelector(sel);
+            if (!cmEl?.CodeMirror) return false;
+            const cm = cmEl.CodeMirror;
+
+            // 1. Seta o conteúdo diretamente via API do CodeMirror
+            cm.focus();
+            cm.setValue(text);
+
+            // 2. Sincroniza o textarea oculto do EasyMDE (fora do .CodeMirror)
+            const hackeditor = cmEl.closest(".hackeditor");
+            if (hackeditor) {
+              const ta = hackeditor.querySelector("textarea.markdownEditor-source");
+              if (ta) {
+                ta.value = text;
+                ta.dispatchEvent(new Event("input",  { bubbles: true }));
+                ta.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
+            return true;
+          },
+          args: [selector, content]
+        });
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      // Conteúdo → #text .CodeMirror
+      await pasteIntoEditor("#text .CodeMirror", msg.content);
+
+      // Opinião → #opinion .CodeMirror
+      if (msg.opinion) {
+        await pasteIntoEditor("#opinion .CodeMirror", msg.opinion);
+      }
+
+      // 7. Salva
+      await new Promise(r => setTimeout(r, 400));
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => { document.querySelector("#submitTask")?.click(); }
+      });
+
+      await new Promise(r => setTimeout(r, 2500));
+      sendResponse({ ok: true });
+
+    } catch (e) {
+      sendResponse({ ok: false, error: e?.message || String(e) });
+    } finally {
+      if (tabId != null) { await new Promise(r => setTimeout(r, 500)); chrome.tabs.remove(tabId).catch(() => {}); }
+    }
+  })();
+
+  return true;
+});
+
 // ---------- Publicação: Desafio ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
@@ -1630,34 +1774,23 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         world: "MAIN",
         func: (content) => {
           // Encontra o textarea interno do CodeMirror (onde o foco real fica)
-          const cmTextarea = document.querySelector(".CodeMirror textarea");
-          const cmEl = document.querySelector(".CodeMirror");
+          const cmEl = document.querySelector("#text .CodeMirror");
 
-          if (cmEl?.CodeMirror && cmTextarea) {
-            // 1. Copia o conteúdo para o clipboard via textarea temporário
-            const tmp = document.createElement("textarea");
-            tmp.value = content;
-            tmp.style.cssText = "position:fixed;opacity:0;top:0;left:0;";
-            document.body.appendChild(tmp);
-            tmp.focus();
-            tmp.select();
-            document.execCommand("copy");
-            document.body.removeChild(tmp);
-
-            // 2. Foca o CodeMirror (adiciona CodeMirror-focused) e seleciona tudo
-            cmEl.CodeMirror.focus();
-            cmEl.CodeMirror.execCommand("selectAll");
-
-            // 3. Cola via Ctrl+V simulado no textarea interno do CodeMirror
-            cmTextarea.focus();
-            document.execCommand("paste");
-
-            return "codemirror-paste";
-          }
-
-          // Fallback: setValue direto (sem foco)
           if (cmEl?.CodeMirror) {
-            cmEl.CodeMirror.setValue(content);
+            const cm = cmEl.CodeMirror;
+            cm.focus();
+            cm.setValue(content);
+
+            // Sincroniza textarea oculto do EasyMDE
+            const hackeditor = cmEl.closest(".hackeditor");
+            if (hackeditor) {
+              const ta = hackeditor.querySelector("textarea.markdownEditor-source");
+              if (ta) {
+                ta.value = content;
+                ta.dispatchEvent(new Event("input",  { bubbles: true }));
+                ta.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
             return "codemirror-setvalue";
           }
 
@@ -1688,6 +1821,166 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await new Promise(r => setTimeout(r, 500));
         chrome.tabs.remove(tabId).catch(() => {});
       }
+    }
+  })();
+
+  return true;
+});
+
+// ---------- Publicação: atividade unificada (PREP/FEZ/PSM/GLOSSARIO) ----------
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_PUBLISH_ACTIVITY") return;
+
+  (async () => {
+    let tabId;
+    try {
+      const baseUrl = "https://cursos.alura.com.br";
+
+      // Mapeamento de tipo → data-tag e título padrão
+      const TYPE_MAP = {
+        PREP:     { dataTag: "SETUP_EXPLANATION",        defaultTitle: "Preparando o ambiente" },
+        FEZ:      { dataTag: "DO_AFTER_ME",              defaultTitle: "Faça como eu fiz" },
+        PSM:      { dataTag: "COMPLEMENTARY_INFORMATION",defaultTitle: null },
+        GLOSSARIO:{ dataTag: "COMPLEMENTARY_INFORMATION",defaultTitle: null },
+      };
+      const typeInfo = TYPE_MAP[msg.activityType];
+      if (!typeInfo) { sendResponse({ ok: false, error: `Tipo desconhecido: ${msg.activityType}` }); return; }
+
+      const activityTitle = typeInfo.defaultTitle || msg.activityName || "Atividade";
+
+      // 1. Busca seções para obter sectionId da aula
+      const sectionsUrl = `${baseUrl}/admin/courses/v2/${msg.courseId}/sections`;
+      tabId = await openTab(sectionsUrl);
+
+      let sections = [];
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(r => setTimeout(r, 800));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            const rows = document.querySelectorAll("#sectionIds tbody tr");
+            if (!rows.length) return null;
+            return [...rows].map(tr => ({ id: tr.id, title: tr.cells[2]?.textContent?.trim() ?? "" })).filter(s => s.id);
+          }
+        });
+        if (res?.[0]?.result?.length) { sections = res[0].result; break; }
+      }
+
+      const section = sections[msg.lessonNum - 1];
+      if (!section?.id) {
+        sendResponse({ ok: false, error: `Seção da Aula ${msg.lessonNum} não encontrada (total: ${sections.length}).` });
+        return;
+      }
+
+      // 2. Navega para criação de atividade
+      const createUrl = `${baseUrl}/admin/course/v2/${msg.courseId}/section/${section.id}/task/create`;
+      await chrome.tabs.update(tabId, { url: createUrl });
+
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector("#chooseTask") });
+        if (res?.[0]?.result) break;
+      }
+
+      // 3. Seleciona o tipo no #chooseTask
+      const clicked = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (dataTag) => {
+          const option = document.querySelector(`option[data-tag="${dataTag}"]`);
+          if (!option) return { ok: false, error: `opção data-tag="${dataTag}" não encontrada` };
+          const select = option.closest("select");
+          if (!select) return { ok: false, error: "select não encontrado" };
+          select.value = option.value;
+          select.dispatchEvent(new Event("change", { bubbles: true }));
+          return { ok: true };
+        },
+        args: [typeInfo.dataTag]
+      });
+      if (!clicked?.[0]?.result?.ok) {
+        sendResponse({ ok: false, error: clicked?.[0]?.result?.error || "Erro ao selecionar tipo" });
+        return;
+      }
+
+      // 4. Aguarda formulário
+      const needsOpinion = msg.activityType === "FEZ";
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: (withOpinion) => {
+            const hasTitle = !!(document.getElementById("task.title") || document.querySelector('input[name="title"]'));
+            const hasEditor = !!document.querySelector(".CodeMirror");
+            const hasOpinion = !withOpinion || !!document.querySelector("#opinion .CodeMirror");
+            return hasTitle && hasEditor && hasOpinion;
+          },
+          args: [needsOpinion]
+        });
+        if (res?.[0]?.result) break;
+      }
+
+      // 5. Preenche título
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (title) => {
+          const el = document.getElementById("task.title") || document.querySelector('input[name="title"]');
+          if (el) { el.value = title; el.dispatchEvent(new Event("input", { bubbles: true })); }
+        },
+        args: [activityTitle]
+      });
+
+      // 6. Função auxiliar: insere texto no CodeMirror do EasyMDE
+      async function pasteIntoEditor(selector, text) {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (sel, content) => {           // content é o texto recebido via args
+            const cmEl = document.querySelector(sel);
+            if (!cmEl?.CodeMirror) return false;
+            const cm = cmEl.CodeMirror;
+            cm.focus();
+            cm.setValue(content);             // usa content, não text
+
+            // Sincroniza o textarea oculto do EasyMDE
+            const hackeditor = cmEl.closest(".hackeditor");
+            if (hackeditor) {
+              const ta = hackeditor.querySelector("textarea.markdownEditor-source");
+              if (ta) {
+                ta.value = content;           // usa content, não text
+                ta.dispatchEvent(new Event("input",  { bubbles: true }));
+                ta.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
+            return true;
+          },
+          args: [selector, text]             // text do escopo externo → vira content no func
+        });
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      // Conteúdo → sempre #text .CodeMirror (FEZ também usa #text para conteúdo)
+      const contentSelector = "#text .CodeMirror";
+      await pasteIntoEditor(contentSelector, msg.content);
+
+      // Opinião (somente FEZ)
+      if (needsOpinion && msg.opinion) {
+        await pasteIntoEditor("#opinion .CodeMirror", msg.opinion);
+      }
+
+      // 7. Salva
+      await new Promise(r => setTimeout(r, 400));
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => { document.querySelector("#submitTask")?.click(); }
+      });
+
+      await new Promise(r => setTimeout(r, 2500));
+      sendResponse({ ok: true });
+
+    } catch (e) {
+      sendResponse({ ok: false, error: e?.message || String(e) });
+    } finally {
+      if (tabId != null) { await new Promise(r => setTimeout(r, 500)); chrome.tabs.remove(tabId).catch(() => {}); }
     }
   })();
 
