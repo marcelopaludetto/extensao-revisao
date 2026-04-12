@@ -57,59 +57,17 @@ Selecione o tipo de produto antes de iniciar:
 | Tipo | Descrição |
 |------|-----------|
 | Curso Técnico | Regras específicas de quantidade de atividades por aula |
+| EFAI | Ensino Fundamental — Anos Iniciais |
 | EFAF | Ensino Fundamental — Anos Finais |
 | EM | Ensino Médio |
-| EFAI | Ensino Fundamental — Anos Iniciais |
 
 **O que verifica:**
-
-- Campos do admin: meta descrição, público-alvo, "Faça esse curso e…", ementa, horas estimadas
-- **Código do curso** — apenas letras minúsculas, números e hífens simples; ao menos duas palavras; sem maiúsculas, acentos, espaços, caracteres especiais nem hífens duplos
-- Transcrição de cada vídeo (mínimo 50 caracteres)
-- Links quebrados (404)
-- Links com `href` vazio
-- Links do GitHub fora do padrão oficial
-- Links de armazenamento em nuvem não oficiais (Dropbox, OneDrive, etc.)
-- Presença do curso nos catálogos corretos e em uma subcategoria
-- Upload do ícone quando o curso está em subcategoria
-- Ao menos 1 exercício habilitado para a Luri
-- Ao menos 1 atividade "O que aprendemos?" habilitada para a Luri
-- Nomes genéricos de seções ("Aula 1", "Aula 2"..., "Classe 1", "Classe 2"...)
-
-**Comportamentos automáticos durante a revisão:**
-
-- Se o curso não estiver em um catálogo, exibe modal para selecionar e adicionar sem sair da revisão
-- Se o curso não estiver em subcategoria, exibe dropdown agrupado por categoria para escolher e adicionar
-- Para cada vídeo encontrado, abre a atividade em segundo plano para registrar a duração no player
-- Se houver atividade inativa bloqueando o acesso ao curso, corrige a ordem automaticamente em todas as aulas
-
-**Ao finalizar:**
-
-- Relatório completo com download em `.txt` e `.json`
-- O curso só recebe **TUDO OK ✅** se ambos os checkboxes Luri estiverem habilitados em ao menos uma atividade
-- A carga horária é verificada com base no número de seções ativas: **1 hora por seção**. Um curso com 8 seções deve ter 8 horas cadastradas.
-
-- Quando há seções com nomes genéricos, aparece o botão **Sugestão dos nomes das aulas**, que aciona o fluxo de renomeação via IA (requer credenciais AWS configuradas)
-
-O histórico das últimas 5 auditorias fica salvo na extensão e pode ser reaberto a qualquer momento.
-
----
-
-#### Cursos Em Breve
-
-Cursos com "Em Breve" no nome seguem um fluxo reduzido:
-
-- Todas as seções e aulas são revisadas, inclusive as desativadas
-- Links e transcrições são verificados normalmente via admin
-- Duração dos vídeos não é carregada (activity pages retornariam erro)
-- Campos admin não são verificados nem corrigidos
-- O relatório exibe aviso **🚧 Curso Em Breve**
-
----
-
-#### Suporte ao novo layout de curso
-
-A extensão detecta o novo layout (acesso antecipado) automaticamente, identificando seções via `ds-accordion-item` e transcrições pelo atributo `aria-label="Transcrição: …"`. Nesse layout, upload de ícone e adição ao catálogo são pulados pois o breadcrumb não está disponível.
+- Categorias certas
+- Fórum bloqueado 
+- Tema correto (START_EM ou START_EFAI)
+- Acessa todas as aulas, ve se tem legenda nos videos (ao fim ele tem o botão para copiar todos os videos que faltam legendas)
+- Corrige a ordem das atividades
+- Exercicios com ou sem Luri.
 
 ---
 
