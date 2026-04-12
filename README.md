@@ -87,12 +87,7 @@ Selecione o tipo de produto antes de iniciar:
 
 - Relatório completo com download em `.txt` e `.json`
 - O curso só recebe **TUDO OK ✅** se ambos os checkboxes Luri estiverem habilitados em ao menos uma atividade
-- Quando há erros nos campos admin, aparece o botão **Corrigir Admin**:
-
-| Campo | Correção automática |
-|-------|---------------------|
-| Carga horária | Horas estimadas pelo sistema + 2h (máximo 20h) |
-| Ementa | Gerada a partir dos títulos dos vídeos de cada seção (formato `-Seção\n*Vídeo`) e preenchida diretamente no admin |
+- A carga horária é verificada com base no número de seções ativas: **1 hora por seção**. Um curso com 8 seções deve ter 8 horas cadastradas.
 
 - Quando há seções com nomes genéricos, aparece o botão **Sugestão dos nomes das aulas**, que aciona o fluxo de renomeação via IA (requer credenciais AWS configuradas)
 
