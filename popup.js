@@ -1023,6 +1023,354 @@ if (fezAllBtn) {
   });
 }
 
+// ---------- Avaliação: descrição fixa ----------
+// Markdown: vai para o CodeMirror (EasyMDE renderiza para HTML)
+const AVAL_DESCRIPTION_MD =
+`Antes de começar, vamos entender como a nossa avaliação funciona?
+
+- A avaliação possui 10 questões. Cada questão possui 5 alternativas, sendo apenas uma alternativa correta.
+- Após ler o enunciado e escolher a alternativa certa, clique em "próxima questão" para continuar.
+- Ao finalizar todas as questões, clique em "Concluir avaliação" para concluir.
+- O resultado não sai na hora. O professor informará sua nota quando o resultado estiver disponível.
+
+E aí, pronto para embarcar nessa jornada com a gente?
+
+Lembre-se de ler com calma as questões e as alternativas, revisar a alternativa que foi marcada antes de passar para próxima questão, beber água e ficar tranquilo(a).
+
+Quaisquer dúvidas sobre as questões e alternativas pode contar com seu professor ou professora para lhe apoiar.
+
+Boa avaliação!`;
+
+// HTML: fallback direto no hidden input (hackeditor-sync)
+const AVAL_DESCRIPTION_HTML =
+`<p>Antes de começar, vamos entender como a nossa avaliação funciona?</p>` +
+`<ul>` +
+`<li>A avaliação possui 10 questões. Cada questão possui 5 alternativas, sendo apenas uma alternativa correta.</li>` +
+`<li>Após ler o enunciado e escolher a alternativa certa, clique em "próxima questão" para continuar.</li>` +
+`<li>Ao finalizar todas as questões, clique em "Concluir avaliação" para concluir.</li>` +
+`<li>O resultado não sai na hora. O professor informará sua nota quando o resultado estiver disponível.</li>` +
+`</ul>` +
+`<p>E aí, pronto para embarcar nessa jornada com a gente?</p>` +
+`<p>Lembre-se de ler com calma as questões e as alternativas, revisar a alternativa que foi marcada antes de passar para próxima questão, beber água e ficar tranquilo(a).</p>` +
+`<p>Quaisquer dúvidas sobre as questões e alternativas pode contar com seu professor ou professora para lhe apoiar.</p>` +
+`<p>Boa avaliação!</p>`;
+
+// ---------- Avaliação: parsing do documento ----------
+function parseAvalDoc(text) {
+  const lines = text.split("\n").map(l => l.trimEnd());
+  const nonEmpty = lines.filter(l => l.trim());
+  const title = nonEmpty[0]?.trim() || "";
+
+  const questions = [];
+  let current = null;
+  let currentAlt = null; // alternativa sendo acumulada (pode ser multilinhas)
+
+  function flushAlt() {
+    if (currentAlt && current) {
+      current.alts.push({ ...currentAlt, text: currentAlt.text.trim() });
+      currentAlt = null;
+    }
+  }
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    // Cabeçalho da questão: "Questão N – Nome" ou "Questão N - Nome"
+    const qMatch = line.match(/^Questão\s+(\d+)\s*[–\-—]\s*(.+)/i);
+    if (qMatch) {
+      flushAlt();
+      if (current) questions.push(current);
+      current = { num: parseInt(qMatch[1]), name: qMatch[2].trim(), text: "", alts: [] };
+      continue;
+    }
+
+    if (!current) continue;
+
+    // Linha de habilidade: "(EM13CO22) ..." — ignora
+    if (/^\([A-Z]{2}\d+[A-Z0-9]*\)/i.test(line)) continue;
+
+    // Início de alternativa com letra: a) b) c) d) e)
+    const altMatch = line.match(/^([a-eA-E])\)\s*(.*)/);
+    if (altMatch) {
+      flushAlt();
+      currentAlt = { letter: altMatch[1].toUpperCase(), text: altMatch[2].trim() };
+      continue;
+    }
+
+    // Início de alternativa como lista numerada (1. 2. 3. 4. 5.) → A B C D E
+    // Só interpreta como alternativa se já há enunciado E o número é sequencial
+    const numAltMatch = line.match(/^([1-5])\.\s+(.*)/);
+    // alts já flushed + 1 se currentAlt ainda está pendente = próximo número esperado
+    const expectedNext = (current?.alts?.length || 0) + (currentAlt ? 2 : 1);
+    if (numAltMatch && current?.text && parseInt(numAltMatch[1]) === expectedNext) {
+      const letter = ["A","B","C","D","E"][parseInt(numAltMatch[1]) - 1];
+      flushAlt();
+      currentAlt = { letter, text: numAltMatch[2].trim() };
+      continue;
+    }
+
+    // Linha de gabarito: "Alternativa B, correta." / "Alternativa B: Correta."
+    const explainMatch = line.match(/^Alternativa\s+([A-E])[,:]\s*(correta|incorreta)/i);
+    if (explainMatch) {
+      flushAlt(); // fecha a última alternativa antes de entrar na seção de explicações
+      if (explainMatch[2].toLowerCase() === "correta") {
+        current.correctAlt = explainMatch[1].toUpperCase();
+      }
+      continue;
+    }
+
+    // Continuação de alternativa multilinhas
+    if (currentAlt) {
+      currentAlt.text = currentAlt.text ? currentAlt.text + "\n" + line : line;
+      continue;
+    }
+
+    // Enunciado: acumula antes das alternativas
+    if (!current.alts.length) {
+      current.text = current.text ? current.text + "\n" + line : line;
+    }
+  }
+  flushAlt();
+  if (current) questions.push(current);
+
+  return { title, questions };
+}
+
+// ---------- Avaliação: envio para a aba ----------
+async function avalSend(msg) {
+  // Questões ficam em URL diferente — usa aba ativa
+  if (msg.field === "question") {
+    const tab = await getActiveTab();
+    return chrome.tabs.sendMessage(tab.id, msg);
+  }
+  // Título e descrição ficam na página de início
+  const tabs = await chrome.tabs.query({ url: "https://cursos.alura.com.br/assessment/create/start/*" });
+  const tab = tabs.length > 0 ? tabs[0] : await getActiveTab();
+  return chrome.tabs.sendMessage(tab.id, msg);
+}
+
+// ---------- Avaliação: renderização dos cards ----------
+function renderAvalCards(parsed) {
+  const container = document.getElementById("aval-cards");
+  container.innerHTML = "";
+
+  function makeCard(label, previewText, onFill) {
+    const card = document.createElement("div");
+    card.className = "aval-card";
+
+    const lbl = document.createElement("div");
+    lbl.className = "aval-card-label";
+    lbl.textContent = label;
+
+    const preview = document.createElement("div");
+    preview.className = "aval-card-text";
+    preview.textContent = previewText;
+
+    const footer = document.createElement("div");
+    footer.className = "aval-card-footer";
+
+    const btn = document.createElement("button");
+    btn.className = "aval-fill-btn";
+    btn.textContent = "Preencher";
+
+    const status = document.createElement("span");
+    status.className = "aval-fill-status";
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      status.textContent = "Preenchendo…";
+      try {
+        const ack = await onFill();
+        if (ack?.ok) {
+          status.textContent = `✅ Preenchido${ack.received ? `: "${ack.received}"` : ""}`;
+          btn.textContent = "Repreencher";
+          btn.classList.add("done");
+        } else {
+          status.textContent = `❌ ${ack?.error || "Erro"}`;
+        }
+      } catch (e) {
+        status.textContent = `❌ ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    footer.appendChild(btn);
+    footer.appendChild(status);
+    card.appendChild(lbl);
+    card.appendChild(preview);
+    card.appendChild(footer);
+    return card;
+  }
+
+  // Card: Título
+  const titleValue = parsed.title;
+  container.appendChild(makeCard("Título", titleValue, () =>
+    avalSend({ type: "ALURA_REVISOR_FILL_ASSESSMENT", field: "title", value: titleValue })
+  ));
+
+  // Card: Descrição
+  const descPreview = AVAL_DESCRIPTION_MD.slice(0, 120) + "…";
+  container.appendChild(makeCard("Descrição", descPreview, () =>
+    avalSend({ type: "ALURA_REVISOR_FILL_ASSESSMENT", field: "description", markdown: AVAL_DESCRIPTION_MD, html: AVAL_DESCRIPTION_HTML })
+  ));
+
+  // Cards: Questões
+  parsed.questions.forEach(q => {
+    const card = document.createElement("div");
+    card.className = "aval-card";
+
+    const lbl = document.createElement("div");
+    lbl.className = "aval-card-label";
+    lbl.textContent = `Questão ${q.num}`;
+
+    const qName = document.createElement("div");
+    qName.style.cssText = "font-size:11px;font-weight:700;color:#0d1117;margin-bottom:4px;";
+    qName.textContent = q.name;
+
+    const qText = document.createElement("div");
+    qText.className = "aval-card-text";
+    qText.textContent = q.text;
+
+    card.appendChild(lbl);
+    card.appendChild(qName);
+    card.appendChild(qText);
+
+    q.alts.forEach(a => {
+      const altEl = document.createElement("div");
+      altEl.className = "aval-card-alt";
+      const isCorrect = q.correctAlt && a.letter === q.correctAlt;
+      if (isCorrect) altEl.style.cssText = "color:#1a7f37;font-weight:700;";
+      altEl.textContent = `${a.letter}) ${a.text}${isCorrect ? " ✓" : ""}`;
+      card.appendChild(altEl);
+    });
+
+    const footer = document.createElement("div");
+    footer.className = "aval-card-footer";
+
+    const btn = document.createElement("button");
+    btn.className = "aval-fill-btn";
+    btn.textContent = "Preencher";
+
+    const status = document.createElement("span");
+    status.className = "aval-fill-status";
+
+    btn.addEventListener("click", async () => {
+      btn.disabled = true;
+      status.textContent = "Preenchendo…";
+      try {
+        const ack = await avalSend({
+          type: "ALURA_REVISOR_FILL_ASSESSMENT",
+          field: "question",
+          question: q,
+        });
+        if (ack?.ok) {
+          const d = ack.debugRadio;
+          const radioInfo = d ? ` | radio: idx=${d.correctIdx}/${d.totalBlocks} found=${d.radioFound} before=${d.checkedBefore} after=${d.checkedAfter}` : "";
+          status.textContent = `✅ Preenchida${radioInfo}`;
+          btn.textContent = "Repreencher";
+          btn.classList.add("done");
+        } else {
+          status.textContent = `❌ ${ack?.error || "Erro"}`;
+        }
+      } catch (e) {
+        status.textContent = `❌ ${e.message}`;
+      } finally {
+        btn.disabled = false;
+      }
+    });
+
+    footer.appendChild(btn);
+    footer.appendChild(status);
+    card.appendChild(footer);
+    container.appendChild(card);
+  });
+}
+
+// ---------- Avaliação: carregar arquivo ----------
+const avalFileInput = document.getElementById("aval-file-input");
+const avalDropArea  = document.getElementById("aval-drop-area");
+const avalStatusEl  = document.getElementById("aval-status");
+
+async function handleAvalFile(file) {
+  if (!file) return;
+  const container = document.getElementById("aval-cards");
+  container.innerHTML = "";
+  avalStatusEl.textContent = "Lendo arquivo…";
+
+  const ext = file.name.split(".").pop().toLowerCase();
+  let text = null;
+
+  if (ext === "docx") {
+    text = await readDocxAsText(file);
+    if (!text) { avalStatusEl.textContent = "Erro ao ler .docx"; return; }
+  } else if (ext === "doc") {
+    avalStatusEl.textContent = "Use .docx, .md ou .txt (o formato .doc binário não é suportado)";
+    return;
+  } else {
+    // .txt, .md — lê como texto puro
+    text = await file.text();
+  }
+
+  // Mostra as primeiras linhas brutas para debug
+  const rawPreview = document.createElement("pre");
+  rawPreview.style.cssText = "font-size:10px;background:#1e1e1e;color:#d4d4d4;padding:8px;border-radius:6px;white-space:pre-wrap;margin-bottom:8px;max-height:120px;overflow-y:auto;";
+  rawPreview.textContent = "── texto extraído (primeiras linhas) ──\n" +
+    text.split("\n").filter(l => l.trim()).slice(0, 10).join("\n");
+  container.appendChild(rawPreview);
+
+  const parsed = parseAvalDoc(text);
+  if (!parsed.title) { avalStatusEl.textContent = "Não encontrei texto no documento."; return; }
+
+  avalStatusEl.textContent = `${parsed.questions.length} questão(ões) encontrada(s).`;
+  renderAvalCards(parsed);
+}
+
+// ---------- Avaliação: criar estrutura (10 questões × 4 alternativas) ----------
+const avalCreateStructureBtn   = document.getElementById("aval-create-structure-btn");
+const avalCreateStructure5aBtn = document.getElementById("aval-create-structure-5a-btn");
+const avalStructureStatus      = document.getElementById("aval-structure-status");
+
+async function avalCreateStructure(totalAlts) {
+  const btn = totalAlts === 5 ? avalCreateStructure5aBtn : avalCreateStructureBtn;
+  btn.disabled = true;
+  avalStructureStatus.textContent = "Criando…";
+  try {
+    const tab = await getActiveTab();
+    const ack = await chrome.tabs.sendMessage(tab.id, {
+      type: "ALURA_REVISOR_FILL_ASSESSMENT",
+      field: "createStructure",
+      totalQuestions: 10,
+      totalAlts,
+    });
+    if (ack?.ok) {
+      avalStructureStatus.textContent = `✅ ${ack.created || 10} questões criadas`;
+    } else {
+      avalStructureStatus.textContent = `❌ ${ack?.error || "Erro"}`;
+    }
+  } catch (e) {
+    avalStructureStatus.textContent = `❌ ${e.message}`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+if (avalCreateStructureBtn)   avalCreateStructureBtn.addEventListener("click",   () => avalCreateStructure(4));
+if (avalCreateStructure5aBtn) avalCreateStructure5aBtn.addEventListener("click", () => avalCreateStructure(5));
+
+if (avalFileInput) avalFileInput.addEventListener("change", (e) => handleAvalFile(e.target.files[0]));
+
+if (avalDropArea) {
+  avalDropArea.addEventListener("dragover", (e) => { e.preventDefault(); avalDropArea.classList.add("drag-over"); });
+  avalDropArea.addEventListener("dragleave", () => avalDropArea.classList.remove("drag-over"));
+  avalDropArea.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    avalDropArea.classList.remove("drag-over");
+    await handleAvalFile(e.dataTransfer.files[0]);
+  });
+}
+
 // ---------- Start revisão ----------
 btn.addEventListener("click", async () => {
   try {

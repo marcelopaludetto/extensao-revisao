@@ -3087,5 +3087,179 @@
     return true;
   });
 
+  // ---------- Publicação: preencher avaliação ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_FILL_ASSESSMENT") return;
+    (async () => {
+      try {
+        const { field, value, question } = msg;
+
+        if (field === "title") {
+          const titleValue = msg.value;
+          if (titleValue === undefined || titleValue === null) {
+            sendResponse({ ok: false, error: `value não chegou (recebido: ${JSON.stringify(msg)})` });
+            return;
+          }
+          const el = document.querySelector('input[name="title"]');
+          if (!el) { sendResponse({ ok: false, error: "Campo título não encontrado na página" }); return; }
+          const nativeSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value")?.set;
+          if (nativeSetter) nativeSetter.call(el, titleValue);
+          else el.value = titleValue;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+          sendResponse({ ok: true, received: titleValue.slice(0, 60) });
+
+        } else if (field === "description") {
+          // EasyMDE usa um contenteditable interno do CodeMirror.
+          // execCommand('insertText') simula digitação real e dispara todos os
+          // eventos que o EasyMDE escuta para sincronizar com o hidden input.
+          const codeDiv = document.querySelector(".CodeMirror-code[contenteditable='true']");
+
+          if (codeDiv && msg.markdown) {
+            codeDiv.focus();
+            document.execCommand("selectAll", false, null);
+            document.execCommand("insertText", false, msg.markdown);
+          } else if (!codeDiv) {
+            // Fallback: tenta cm.setValue() mesmo assim
+            const cm = document.querySelector(".CodeMirror")?.CodeMirror;
+            if (cm && msg.markdown) {
+              cm.setValue(msg.markdown);
+              cm.setCursor(cm.lineCount(), 0);
+            }
+          }
+
+          // Garante hidden input com HTML independentemente
+          const hidden = document.querySelector('input[name="descriptionHighlightedText"]');
+          if (hidden && msg.html) {
+            hidden.value = msg.html;
+            hidden.dispatchEvent(new Event("input",  { bubbles: true }));
+            hidden.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+
+          if (!codeDiv && !hidden) {
+            sendResponse({ ok: false, error: "contenteditable e hidden input não encontrados" });
+            return;
+          }
+          sendResponse({ ok: true, codeDivFound: !!codeDiv, hiddenFound: !!hidden });
+
+        } else if (field === "createStructure") {
+          const totalQ = msg.totalQuestions || 10;
+          const totalA = msg.totalAlts      || 4;
+
+          const addQBtn = document.querySelector(".assessment__questions__add");
+          if (!addQBtn) {
+            sendResponse({ ok: false, error: "Botão 'Adicionar questão' não encontrado — abra a página de questões primeiro" });
+            return;
+          }
+
+          let created = 0;
+          for (let qi = 0; qi < totalQ; qi++) {
+            // Garante que o wrapper da questão qi existe
+            let wrapper = document.querySelectorAll(".assessment__question__wrapper")[qi];
+            if (!wrapper) {
+              addQBtn.click();
+              await sleep(500);
+              wrapper = document.querySelectorAll(".assessment__question__wrapper")[qi];
+            }
+            if (!wrapper) continue;
+
+            // Adiciona alternativas até totalA (por contagem DOM, não por name)
+            const addAltBtn = wrapper.querySelector(".assessment__question__alternatives__add");
+            let altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
+            while (altCount < totalA) {
+              addAltBtn?.click();
+              await sleep(350);
+              altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
+            }
+            created++;
+          }
+          sendResponse({ ok: true, created });
+
+        } else if (field === "question") {
+          const q    = msg.question;
+          const qIdx = (q.num || 1) - 1;
+
+          async function fillHked(container, text) {
+            const codeDiv = container?.querySelector('.CodeMirror-code[contenteditable="true"]');
+            if (!codeDiv) return false;
+            codeDiv.focus();
+            document.execCommand("selectAll", false, null);
+            document.execCommand("insertText", false, text);
+            return true;
+          }
+
+          function setHidden(input, html) {
+            if (!input) return;
+            input.value = html;
+            input.dispatchEvent(new Event("input",  { bubbles: true }));
+            input.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+
+          // Localiza wrapper por posição DOM (mais confiável que name para blocos dinâmicos)
+          const wrapper = document.querySelectorAll(".assessment__question__wrapper")[qIdx];
+          if (!wrapper) {
+            sendResponse({ ok: false, error: `Questão ${q.num} não encontrada — use "Criar estrutura" primeiro` });
+            return;
+          }
+
+          // Enunciado: .assessment__question--alternative (hífen, não underscore)
+          const qSection = wrapper.querySelector(".assessment__question--alternative");
+          await fillHked(qSection, q.text || "");
+          setHidden(
+            qSection?.querySelector("input.hackeditor-sync"),
+            `<p>${(q.text || "").replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>")}</p>`
+          );
+
+          // Alternativas: seleciona por posição DOM — name é incorreto nas alternativas dinâmicas (C, D...)
+          const altBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
+          for (let j = 0; j < (q.alts || []).length; j++) {
+            const altBlock = altBlocks[j];
+            if (!altBlock) continue;
+            await fillHked(altBlock, q.alts[j].text);
+            setHidden(altBlock.querySelector("input.hackeditor-sync"), `<p>${q.alts[j].text}</p>`);
+          }
+
+          // Aguarda DOM estabilizar após os execCommands antes de clicar no radio
+          await sleep(500);
+          document.activeElement?.blur();
+
+          const debugRadio = { correctAlt: q.correctAlt, correctIdx: -1, radioFound: false, checkedBefore: null, checkedAfter: null };
+
+          if (q.correctAlt) {
+            const correctIdx = (q.alts || []).findIndex(a => a.letter === q.correctAlt);
+            debugRadio.correctIdx = correctIdx;
+            if (correctIdx >= 0) {
+              const freshBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
+              debugRadio.totalBlocks = freshBlocks.length;
+              const radio = freshBlocks[correctIdx]?.querySelector('input[type="radio"]');
+              debugRadio.radioFound = !!radio;
+              if (radio) {
+                debugRadio.checkedBefore = radio.checked;
+                radio.click();
+                await sleep(200);
+                debugRadio.checkedAfter = radio.checked;
+              }
+              freshBlocks.forEach((block, idx) => {
+                const hidden = block.querySelector("input.correct-alternative");
+                if (!hidden) return;
+                hidden.value = idx === correctIdx ? "true" : "false";
+                hidden.dispatchEvent(new Event("change", { bubbles: true }));
+              });
+            }
+          }
+          sendResponse({ ok: true, debugRadio });
+
+          sendResponse({ ok: true });
+
+        } else {
+          sendResponse({ ok: false, error: `Campo desconhecido: ${field}` });
+        }
+      } catch (e) {
+        sendResponse({ ok: false, error: e.message });
+      }
+    })();
+    return true;
+  });
+
   // ================================================================
 })();

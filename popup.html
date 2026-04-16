@@ -544,6 +544,65 @@
     .pub-lesson-status.error { color: #CA3328; }
     .pub-lesson-status.loading { color: #F79722; }
 
+    /* ── Avaliação ──────────────────────────────────────────────── */
+    .aval-card {
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      padding: 10px 12px;
+      background: #fff;
+    }
+
+    .aval-card-label {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+      color: #9761FF;
+      margin-bottom: 4px;
+    }
+
+    .aval-card-text {
+      font-size: 11px;
+      color: #0d1117;
+      white-space: pre-wrap;
+      margin-bottom: 8px;
+      line-height: 1.45;
+    }
+
+    .aval-card-alt {
+      font-size: 11px;
+      color: #444d56;
+      padding: 2px 0;
+    }
+
+    .aval-card-footer {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .aval-fill-btn {
+      width: auto;
+      padding: 5px 14px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #9761FF;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+
+    .aval-fill-btn:hover:not(:disabled) { background: #7c4de8; }
+    .aval-fill-btn:disabled { opacity: 0.6; cursor: default; }
+    .aval-fill-btn.done { background: #56A145; }
+
+    .aval-fill-status {
+      font-size: 11px;
+      color: #444d56;
+    }
+
     #pub-all-btn, #fez-all-btn {
       background: #9761FF;
       color: #fff;
@@ -681,7 +740,7 @@
 
       <hr class="divider">
 
-      <div class="section-label">Faça como eu fiz</div>
+      <div class="section-label">Atividades</div>
 
       <label class="pub-drop-area" id="fez-drop-area" for="fez-file-input">
         <input type="file" id="fez-file-input" accept=".txt,.docx,.doc">
@@ -699,6 +758,24 @@
       <button id="fez-all-btn" style="display:none">Publicar todas as aulas</button>
 
       <pre id="fez-debug" style="display:none;font-size:10px;background:#1e1e1e;color:#d4d4d4;padding:8px;border-radius:6px;max-height:200px;overflow-y:auto;white-space:pre-wrap;margin-top:8px;"></pre>
+
+      <hr class="divider">
+
+      <div class="section-label">Avaliação</div>
+
+      <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap;">
+        <button id="aval-create-structure-btn" style="width:auto;padding:6px 14px;font-size:12px;font-weight:600;background:#3D6CE2;color:#fff;border:none;border-radius:6px;cursor:pointer;">Criar estrutura (10Q × 4A)</button>
+        <button id="aval-create-structure-5a-btn" style="width:auto;padding:6px 14px;font-size:12px;font-weight:600;background:#3D6CE2;color:#fff;border:none;border-radius:6px;cursor:pointer;">Criar estrutura (10Q × 5A)</button>
+        <span id="aval-structure-status" style="font-size:11px;color:#444d56;"></span>
+      </div>
+
+      <label class="pub-drop-area" id="aval-drop-area" for="aval-file-input">
+        <input type="file" id="aval-file-input" accept=".docx,.doc,.md,.txt">
+        <span>📄 Arraste ou clique para selecionar o <strong>.docx</strong></span>
+      </label>
+
+      <div id="aval-status" style="margin-top:4px;font-size:12px;color:#CA3328;"></div>
+      <div id="aval-cards" style="margin-top:8px;display:flex;flex-direction:column;gap:8px;"></div>
 
     </div>
 
