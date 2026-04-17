@@ -664,8 +664,41 @@ function decodeXmlEntities(s) {
           .replace(/&#x2013;/g,"–").replace(/&#x2014;/g,"—");
 }
 
+// Parseia word/numbering.xml em um mapa: numId -> ilvl -> numFmt
+// numFmt ex.: "bullet", "decimal", "lowerLetter", "upperLetter", "lowerRoman"…
+function parseNumberingXml(xml) {
+  if (!xml) return {};
+  // Passo 1: abstractNumId -> { ilvl -> numFmt }
+  const abstractMap = {};
+  const absRe = /<w:abstractNum[^>]*w:abstractNumId="(\d+)"[^>]*>([\s\S]*?)<\/w:abstractNum>/g;
+  let m;
+  while ((m = absRe.exec(xml))) {
+    const absId = m[1];
+    const body = m[2];
+    const levels = {};
+    const lvlRe = /<w:lvl[^>]*w:ilvl="(\d+)"[^>]*>([\s\S]*?)<\/w:lvl>/g;
+    let lm;
+    while ((lm = lvlRe.exec(body))) {
+      const ilvl = lm[1];
+      const fmtM = lm[2].match(/<w:numFmt[^>]*w:val="([^"]+)"/);
+      levels[ilvl] = fmtM?.[1] || "decimal";
+    }
+    abstractMap[absId] = levels;
+  }
+  // Passo 2: numId -> abstractNumId -> levels
+  const numMap = {};
+  const numRe = /<w:num\s[^>]*w:numId="(\d+)"[^>]*>([\s\S]*?)<\/w:num>/g;
+  while ((m = numRe.exec(xml))) {
+    const numId = m[1];
+    const absIdM = m[2].match(/<w:abstractNumId[^>]*w:val="(\d+)"/);
+    const absId = absIdM?.[1];
+    if (absId && abstractMap[absId]) numMap[numId] = abstractMap[absId];
+  }
+  return numMap;
+}
+
 // Converte word/document.xml em texto, preservando numeração de listas
-function parseDocumentXml(xml) {
+function parseDocumentXml(xml, numFormats = {}) {
   const listCounters = {};
 
   // Passo 1: percorre parágrafos via indexOf (sem regex) e injeta números de lista
@@ -696,8 +729,14 @@ function parseDocumentXml(xml) {
       const numId  = numIdM?.[1] ?? "0";
       const ilvl   = ilvlM?.[1]  ?? "0";
       const key    = `${numId}:${ilvl}`;
-      listCounters[key] = (listCounters[key] ?? 0) + 1;
-      prefix = "  ".repeat(+ilvl) + listCounters[key] + ". ";
+      const fmt    = numFormats[numId]?.[ilvl] || "decimal";
+      const indent = "  ".repeat(+ilvl);
+      if (fmt === "bullet") {
+        prefix = indent + "- ";
+      } else {
+        listCounters[key] = (listCounters[key] ?? 0) + 1;
+        prefix = indent + listCounters[key] + ". ";
+      }
     }
 
     out += before + openTag + prefix + body + "</w:p>";
@@ -714,7 +753,9 @@ async function readDocxAsText(file) {
   const bytes = new Uint8Array(buffer);
   const xml = await extractZipEntry(bytes, "word/document.xml");
   if (!xml) return null;
-  return parseDocumentXml(xml);
+  const numberingXml = await extractZipEntry(bytes, "word/numbering.xml");
+  const numFormats = parseNumberingXml(numberingXml);
+  return parseDocumentXml(xml, numFormats);
 }
 
 // ---------- Publicação: carregar arquivo ----------
