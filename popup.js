@@ -697,31 +697,115 @@ function parseNumberingXml(xml) {
   return numMap;
 }
 
-// Converte word/document.xml em texto, preservando numeração de listas
+// Extrai texto de um parágrafo processando runs (<w:r>) e aplicando Markdown
+// para negrito (**...**) e itálico (*...*).
+function extractParagraphText(body) {
+  const segments = [];
+  let pos = 0;
+
+  while (pos < body.length) {
+    const rOpen = body.indexOf("<w:r", pos);
+    if (rOpen < 0) break;
+    // garante <w:r> ou <w:r ...>, não <w:rPr> nem <w:rFonts>
+    const nextCh = body[rOpen + 4];
+    if (nextCh !== ">" && nextCh !== " " && nextCh !== "/") { pos = rOpen + 4; continue; }
+
+    const rTagClose = body.indexOf(">", rOpen);
+    if (rTagClose < 0) break;
+    if (body[rTagClose - 1] === "/") { pos = rTagClose + 1; continue; }
+
+    const rClose = body.indexOf("</w:r>", rTagClose + 1);
+    if (rClose < 0) break;
+    const runBody = body.slice(rTagClose + 1, rClose);
+
+    // Propriedades do run
+    let bold = false, italic = false;
+    const rPrStart = runBody.indexOf("<w:rPr>");
+    const rPrEnd   = runBody.indexOf("</w:rPr>");
+    if (rPrStart >= 0 && rPrEnd > rPrStart) {
+      const rPr = runBody.slice(rPrStart + 7, rPrEnd);
+      const hasB = /<w:b(?:\s[^>]*)?\/?>/.test(rPr) && !/<w:b[^>]*w:val="(0|false)"/.test(rPr);
+      const hasI = /<w:i(?:\s[^>]*)?\/?>/.test(rPr) && !/<w:i[^>]*w:val="(0|false)"/.test(rPr);
+      bold = hasB;
+      italic = hasI;
+    }
+
+    // Extrai texto de <w:t>...</w:t> dentro do run
+    let text = "";
+    let tpos = 0;
+    while (tpos < runBody.length) {
+      const tOpen = runBody.indexOf("<w:t", tpos);
+      if (tOpen < 0) break;
+      const nCh = runBody[tOpen + 4];
+      // <w:t> precisa ser seguido por >, espaço ou /
+      if (nCh !== ">" && nCh !== " " && nCh !== "/") { tpos = tOpen + 4; continue; }
+      const tTagClose = runBody.indexOf(">", tOpen);
+      if (tTagClose < 0) break;
+      if (runBody[tTagClose - 1] === "/") { tpos = tTagClose + 1; continue; }
+      const tEnd = runBody.indexOf("</w:t>", tTagClose + 1);
+      if (tEnd < 0) break;
+      text += runBody.slice(tTagClose + 1, tEnd);
+      tpos = tEnd + 6;
+    }
+
+    if (text) segments.push({ bold, italic, text });
+    pos = rClose + 6;
+  }
+
+  // Mescla segmentos adjacentes com mesmo estilo (Word frequentemente quebra
+  // palavras em vários runs; sem mesclar sairia **Pal****avra**).
+  const merged = [];
+  for (const seg of segments) {
+    const last = merged[merged.length - 1];
+    if (last && last.bold === seg.bold && last.italic === seg.italic) {
+      last.text += seg.text;
+    } else {
+      merged.push({ ...seg });
+    }
+  }
+
+  // Emite com Markdown, puxando espaços nas bordas pra fora dos marcadores
+  // (Markdown não renderiza "** foo **").
+  let out = "";
+  for (const seg of merged) {
+    if (!seg.text) continue;
+    if (!seg.bold && !seg.italic) { out += seg.text; continue; }
+    const match = seg.text.match(/^(\s*)([\s\S]*?)(\s*)$/);
+    const lead = match[1], core = match[2], trail = match[3];
+    if (!core) { out += seg.text; continue; }
+    let wrapped = core;
+    if (seg.italic) wrapped = "*" + wrapped + "*";
+    if (seg.bold)   wrapped = "**" + wrapped + "**";
+    out += lead + wrapped + trail;
+  }
+  return out;
+}
+
+// Converte word/document.xml em texto Markdown, preservando numeração de listas,
+// bullets e formatação inline (negrito/itálico).
 function parseDocumentXml(xml, numFormats = {}) {
   const listCounters = {};
-
-  // Passo 1: percorre parágrafos via indexOf (sem regex) e injeta números de lista
-  let out = "";
+  const paragraphs = [];
   let pos = 0;
+
   while (pos < xml.length) {
     const pOpen = xml.indexOf("<w:p", pos);
-    if (pOpen < 0) { out += xml.slice(pos); break; }
+    if (pOpen < 0) break;
+    const nCh = xml[pOpen + 4];
+    if (nCh !== ">" && nCh !== " " && nCh !== "/") { pos = pOpen + 4; continue; }
 
     const tagClose = xml.indexOf(">", pOpen);
-    if (tagClose < 0) { out += xml.slice(pos); break; }
+    if (tagClose < 0) break;
+    if (xml[tagClose - 1] === "/") { paragraphs.push(""); pos = tagClose + 1; continue; }
 
     const pClose = xml.indexOf("</w:p>", tagClose + 1);
-    if (pClose < 0) { out += xml.slice(pos); break; }
+    if (pClose < 0) break;
+    const body = xml.slice(tagClose + 1, pClose);
 
-    const before  = xml.slice(pos, pOpen);
-    const openTag = xml.slice(pOpen, tagClose + 1);
-    const body    = xml.slice(tagClose + 1, pClose);
-
-    // Detecta lista numerada no corpo do parágrafo
+    // Prefixo de lista (numerada/bullet) via numPr + numbering.xml
+    let prefix = "";
     const numPrStart = body.indexOf("<w:numPr>");
     const numPrEnd   = body.indexOf("</w:numPr>");
-    let prefix = "";
     if (numPrStart >= 0 && numPrEnd > numPrStart) {
       const numPrBody = body.slice(numPrStart + 9, numPrEnd);
       const numIdM = numPrBody.match(/<w:numId w:val="(\d+)"/);
@@ -739,13 +823,18 @@ function parseDocumentXml(xml, numFormats = {}) {
       }
     }
 
-    out += before + openTag + prefix + body + "</w:p>";
+    const text = extractParagraphText(body);
+    paragraphs.push(prefix + text);
     pos = pClose + 6;
   }
 
-  // Passo 2: extração simples — quebra em </w:p> e strip de tags
-  out = out.replace(/<\/w:p>/g, "\n").replace(/<[^>]+>/g, "");
-  return decodeXmlEntities(out).replace(/\n{3,}/g, "\n\n").trim();
+  // Colapsa pares de marcadores colados que surgem quando o autor digitou
+  // **texto** no Word E também marcou o trecho como negrito: vira ****texto****.
+  // `****` (negrito-abre + negrito-fecha sem conteúdo) → `**`.
+  return decodeXmlEntities(paragraphs.join("\n"))
+    .replace(/\*{4,}/g, "**")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
 }
 
 async function readDocxAsText(file) {
@@ -1105,6 +1194,7 @@ function parseAvalDoc(text) {
   const questions = [];
   let current = null;
   let currentAlt = null; // alternativa sendo acumulada (pode ser multilinhas)
+  let inExplanations = false; // true entre "Alternativa X: Correta/Incorreta" e próxima Questão
 
   function flushAlt() {
     if (currentAlt && current) {
@@ -1113,8 +1203,19 @@ function parseAvalDoc(text) {
     }
   }
 
+  // Remove marcadores Markdown de ênfase (**/*) em torno de tokens-chave e nas
+  // bordas, para não quebrar o matching quando o Word exporta títulos/rótulos
+  // em negrito. Ordem importa: pares cercando tokens ANTES de remover bordas,
+  // senão o par fica órfão (ex: "**Alternativa A**, incorreta" → "Alternativa A**, incorreta").
+  const stripEmphasis = (s) => s
+    .replace(/\*{1,3}(Questão\s+\d+)\*{1,3}/gi, "$1")
+    .replace(/\*{1,3}([a-eA-E]\))\*{1,3}/g, "$1")
+    .replace(/\*{1,3}(Alternativa\s+[A-E])\*{1,3}/gi, "$1")
+    .replace(/^\*{1,3}/, "")
+    .replace(/\*{1,3}$/, "");
+
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
+    const line = stripEmphasis(lines[i].trim());
     if (!line) continue;
 
     // Cabeçalho da questão: "Questão N – Nome" ou "Questão N - Nome"
@@ -1122,11 +1223,21 @@ function parseAvalDoc(text) {
     if (qMatch) {
       flushAlt();
       if (current) questions.push(current);
-      current = { num: parseInt(qMatch[1]), name: qMatch[2].trim(), text: "", alts: [] };
+      const cleanName = qMatch[2].trim().replace(/^\*{1,3}/, "").replace(/\*{1,3}$/, "").trim();
+      current = { num: parseInt(qMatch[1]), name: cleanName, text: "", alts: [] };
+      inExplanations = false;
       continue;
     }
 
     if (!current) continue;
+    // Uma vez em modo explicação, só processamos gabaritos; todo resto é descartado.
+    if (inExplanations) {
+      const explainOnly = line.match(/^Alternativa\s+([A-E])[\s,:.\-–—]+(correta|incorreta)/i);
+      if (explainOnly && explainOnly[2].toLowerCase() === "correta") {
+        current.correctAlt = explainOnly[1].toUpperCase();
+      }
+      continue;
+    }
 
     // Linha de habilidade: "(EM13CO22) ..." — ignora
     if (/^\([A-Z]{2}\d+[A-Z0-9]*\)/i.test(line)) continue;
@@ -1151,13 +1262,14 @@ function parseAvalDoc(text) {
       continue;
     }
 
-    // Linha de gabarito: "Alternativa B, correta." / "Alternativa B: Correta."
-    const explainMatch = line.match(/^Alternativa\s+([A-E])[,:]\s*(correta|incorreta)/i);
+    // Linha de gabarito: "Alternativa B, correta." / "Alternativa B: Correta." / com traço
+    const explainMatch = line.match(/^Alternativa\s+([A-E])[\s,:.\-–—]+(correta|incorreta)/i);
     if (explainMatch) {
       flushAlt(); // fecha a última alternativa antes de entrar na seção de explicações
       if (explainMatch[2].toLowerCase() === "correta") {
         current.correctAlt = explainMatch[1].toUpperCase();
       }
+      inExplanations = true; // a partir daqui, ignora tudo até a próxima "Questão N"
       continue;
     }
 
