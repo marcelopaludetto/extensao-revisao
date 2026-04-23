@@ -3087,6 +3087,16 @@
     return true;
   });
 
+  // ---------- Publicação: criar exercício (Ordenar Blocos) ----------
+  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== "ALURA_REVISOR_CREATE_EXERCICIO") return;
+    (async () => {
+      try { sendResponse(await sendToBackground(msg)); }
+      catch (e) { sendResponse({ ok: false, error: e.message }); }
+    })();
+    return true;
+  });
+
   // ---------- Publicação: preencher avaliação ----------
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type !== "ALURA_REVISOR_FILL_ASSESSMENT") return;

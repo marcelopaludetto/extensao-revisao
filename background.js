@@ -1986,3 +1986,577 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
   return true;
 });
+
+// ---------- Exercícios: criar atividade ----------
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_CREATE_EXERCICIO") return;
+
+  (async () => {
+    let tabId;
+    try {
+      const baseUrl = "https://cursos.alura.com.br";
+      const { courseId, lessonNum, exercicio } = msg;
+
+      const sectionsUrl = `${baseUrl}/admin/courses/v2/${courseId}/sections`;
+      tabId = await openTab(sectionsUrl);
+
+      let sections = [];
+      for (let attempt = 0; attempt < 12; attempt++) {
+        await new Promise(r => setTimeout(r, 800));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => {
+            const rows = document.querySelectorAll("#sectionIds tbody tr");
+            if (!rows.length) return null;
+            return [...rows].map(tr => ({ id: tr.id, title: tr.cells[2]?.textContent?.trim() ?? "" })).filter(s => s.id);
+          }
+        });
+        if (res?.[0]?.result?.length) { sections = res[0].result; break; }
+      }
+
+      const section = sections[lessonNum - 1];
+      if (!section?.id) { sendResponse({ ok: false, error: `Seção Aula ${lessonNum} não encontrada (total: ${sections.length}).` }); return; }
+
+      const createUrl = `${baseUrl}/admin/course/v2/${courseId}/section/${section.id}/task/create`;
+      await chrome.tabs.update(tabId, { url: createUrl });
+
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector("#chooseTask") });
+        if (res?.[0]?.result) break;
+      }
+
+      const taskEnum = exercicio.tipo === "ordenar" ? "SORT_BLOCKS" : "SINGLE_CHOICE";
+      const selected = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (enumVal) => {
+          const opt = document.querySelector(`#chooseTask option[data-task-enum="${enumVal}"]`);
+          if (!opt) return { ok: false, error: `option[data-task-enum="${enumVal}"] não achado em #chooseTask` };
+          const sel = document.getElementById("chooseTask");
+          if (!sel) return { ok: false, error: "#chooseTask não encontrado" };
+
+          // Marca a option, ajusta selectedIndex e value
+          [...sel.options].forEach(o => o.selected = false);
+          opt.selected = true;
+          sel.selectedIndex = opt.index;
+
+          // Dispara change nativo + jQuery (Alura usa jQuery)
+          sel.dispatchEvent(new Event("change", { bubbles: true }));
+          sel.dispatchEvent(new Event("input",  { bubbles: true }));
+          if (window.jQuery) {
+            try { window.jQuery(sel).trigger("change"); } catch (e) {}
+          }
+          return { ok: true, selectedIndex: opt.index, enumFound: opt.dataset.taskEnum };
+        },
+        args: [taskEnum]
+      });
+      if (!selected?.[0]?.result?.ok) { sendResponse({ ok: false, error: selected?.[0]?.result?.error || "Erro ao selecionar tipo" }); return; }
+
+      for (let i = 0; i < 30; i++) {
+        await new Promise(r => setTimeout(r, 500));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          func: () => !!(document.getElementById("task.title") || document.querySelector('input[name="title"]'))
+        });
+        if (res?.[0]?.result) break;
+      }
+
+      // Aguarda o CodeMirror do enunciado inicializar
+      for (let i = 0; i < 20; i++) {
+        await new Promise(r => setTimeout(r, 150));
+        const res = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: () => {
+            const cm = document.querySelector("#text .CodeMirror") ||
+                       document.querySelector("[id*='statement'] .CodeMirror") ||
+                       document.querySelector(".CodeMirror");
+            return !!cm?.CodeMirror;
+          }
+        });
+        if (res?.[0]?.result) break;
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: (title) => {
+          const el = document.getElementById("task.title") || document.querySelector('input[name="title"]');
+          if (!el) return;
+          el.value = title;
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        },
+        args: [exercicio.questNome]
+      });
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (text) => {
+          const toHtml = (raw) => {
+            const src = String(raw || "");
+            const esc = (s) => s
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+            const lines = src.split("\n");
+            const out = [];
+            let i = 0;
+            while (i < lines.length) {
+              const line = lines[i].trimEnd();
+              if (!line.trim()) { i++; continue; }
+              if (line.trimStart().startsWith(">")) {
+                const quote = [];
+                while (i < lines.length && lines[i].trimStart().startsWith(">")) {
+                  quote.push(lines[i].replace(/^\s*>\s?/, "").trimEnd());
+                  i++;
+                }
+                out.push(`<blockquote>\n<p>${esc(quote.join("\n")).replace(/\n/g, "<br>")}</p>\n</blockquote>`);
+                continue;
+              }
+              const para = [];
+              while (i < lines.length && lines[i].trim()) {
+                if (lines[i].trimStart().startsWith(">")) break;
+                para.push(lines[i].trimEnd());
+                i++;
+              }
+              out.push(`<p>${esc(para.join("\n")).replace(/\n/g, "<br>")}</p>`);
+            }
+            return out.join("\n");
+          };
+          const cmEl = document.querySelector("#text .CodeMirror") || document.querySelector("[id*='statement'] .CodeMirror") || document.querySelector(".CodeMirror");
+          if (cmEl?.CodeMirror) {
+            const cm = cmEl.CodeMirror;
+            cm.focus();
+            cm.setValue(text);
+            cm.save();
+            const hackeditor = cmEl.closest(".hackeditor");
+            if (hackeditor) {
+              const ta = hackeditor.querySelector("textarea.markdownEditor-source");
+              if (ta) { ta.value = text; ta.dispatchEvent(new Event("input", { bubbles: true })); ta.dispatchEvent(new Event("change", { bubbles: true })); }
+              const hidden = hackeditor.querySelector('input.hackeditor-sync[name="textHighlighted"], input.hackeditor-sync');
+              if (hidden) {
+                hidden.value = toHtml(text);
+                hidden.dispatchEvent(new Event("input", { bubbles: true }));
+                hidden.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+            }
+            return true;
+          }
+          const fallback = document.querySelector('textarea[name="text"], textarea[name="statement"], textarea[name="enunciado"], input[name="text"], input[name="statement"], input[name="enunciado"]');
+          if (!fallback) return false;
+          fallback.value = text;
+          fallback.dispatchEvent(new Event("input", { bubbles: true }));
+          fallback.dispatchEvent(new Event("change", { bubbles: true }));
+          const highlighted = document.querySelector('input[name="textHighlighted"]');
+          if (highlighted) {
+            highlighted.value = toHtml(text);
+            highlighted.dispatchEvent(new Event("input", { bubbles: true }));
+            highlighted.dispatchEvent(new Event("change", { bubbles: true }));
+          }
+          return true;
+        },
+        args: [exercicio.enunciado || ""]
+      });
+      await new Promise(r => setTimeout(r, 400));
+
+      let feedbackDebug = null;
+      if (exercicio.tipo !== "ordenar" && exercicio.alts?.length) {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (alts, correctAlt) => {
+            const toHtml = (raw) => {
+              const text = String(raw || "");
+              const esc = (s) => s
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+              const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+              if (!parts.length) return "";
+              return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+            };
+            const setField = (sel, value) => {
+              const el = document.querySelector(sel);
+              if (!el) return false;
+              el.value = value;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              return true;
+            };
+            const setMarkdownEditor = (i, field, value) => {
+              const root = document.querySelector(`#alternatives-${i}-${field}`);
+              const cmEl = root?.querySelector(".CodeMirror");
+              if (cmEl?.CodeMirror) {
+                const cm = cmEl.CodeMirror;
+                cm.focus();
+                cm.setValue(value);
+                cm.save();
+                const input = cm.getInputField ? cm.getInputField() : (cm.display?.input?.getField?.() || cm.display?.input?.textarea);
+                if (input) input.focus();
+              }
+              setField(`textarea[name="alternatives[${i}].${field}"]`, value);
+              setField(`input[name="alternatives[${i}].${field}Highlighted"]`, toHtml(value));
+            };
+
+            const current = document.querySelectorAll('textarea[name^="alternatives["][name$=".text"]').length;
+            const needed = Math.max(0, alts.length - current);
+            for (let j = 0; j < needed; j++) {
+              const btn = document.querySelector('input.add-alternative[data-type="emptySingleAlternative"], .add-alternative[data-type="emptySingleAlternative"]');
+              btn?.click();
+            }
+
+            alts.forEach((alt, i) => {
+              const text = alt?.text || "";
+              const opinion = alt?.opinion || "";
+              setMarkdownEditor(i, "text", text);
+              setMarkdownEditor(i, "opinion", opinion);
+              const radio = document.querySelector(`input.fieldGroup-alternative-actions-correct[name="alternatives[${i}].correct"]`);
+              const isCorrect = !!correctAlt && String(correctAlt).toUpperCase() === String(alt?.letter || "").toUpperCase();
+              if (radio) {
+                radio.checked = isCorrect;
+                if (isCorrect) radio.click();
+              }
+            });
+            return { totalAlts: alts.length, current };
+          },
+          args: [exercicio.alts, exercicio.correctAlt || ""]
+        });
+        await new Promise(r => setTimeout(r, 600));
+      }
+
+      if (exercicio.tipo === "ordenar" && exercicio.blocks?.length) {
+        for (let bi = 0; bi < exercicio.blocks.length; bi++) {
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => {
+              const btn = document.querySelector('.add-block[data-type="emptySortBlocksBlock"]') ||
+                          document.querySelector('input[value="Adicionar bloco"]') ||
+                          document.querySelector(".btn.add-block");
+              btn?.click();
+              return !!btn;
+            }
+          });
+          await new Promise(r => setTimeout(r, 500));
+        }
+
+        // Preenche blocks[N].text e marca blocks[N].partOfSolution em todos
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (blocks) => {
+            function fillBlockText(i, text) {
+              const cmEl = document.querySelector(`#blocks\\.${i}\\.text + .CodeMirror`) ||
+                           document.querySelector(`#blocks\\.${i}\\.text ~ .CodeMirror`) ||
+                           document.querySelector(`[id="blocks.${i}.text"] + .CodeMirror`) ||
+                           document.querySelector(`[id="blocks.${i}.text"] ~ .CodeMirror`) ||
+                           document.querySelector(`textarea[name="blocks[${i}].text"] + .CodeMirror`) ||
+                           document.querySelector(`textarea[name="blocks[${i}].text"] ~ .CodeMirror`);
+              if (cmEl?.CodeMirror) {
+                cmEl.CodeMirror.focus();
+                cmEl.CodeMirror.setValue(text);
+                const hackeditor = cmEl.closest(".hackeditor");
+                if (hackeditor) {
+                  const ta = hackeditor.querySelector("textarea.markdownEditor-source");
+                  if (ta) {
+                    ta.value = text;
+                    ta.dispatchEvent(new Event("input", { bubbles: true }));
+                    ta.dispatchEvent(new Event("change", { bubbles: true }));
+                  }
+                }
+                return true;
+              }
+              const input = document.querySelector(`textarea[name="blocks[${i}].text"], input[name="blocks[${i}].text"]`);
+              if (!input) return false;
+              input.value = text;
+              input.dispatchEvent(new Event("input", { bubbles: true }));
+              input.dispatchEvent(new Event("change", { bubbles: true }));
+              return true;
+            }
+
+            const checkboxes = [...document.querySelectorAll('input[name^="blocks["][name$=".partOfSolution"]')];
+            let filledTexts = 0;
+            blocks.forEach((block, i) => {
+              const text = typeof block === "string" ? block : (block?.text || "");
+              const shouldCheck = typeof block === "string" ? true : !!block?.partOfSolution;
+
+              if (fillBlockText(i, text)) {
+                filledTexts++;
+              }
+              if (checkboxes[i] && checkboxes[i].checked !== shouldCheck) checkboxes[i].click();
+            });
+            return { filledTexts, checkboxes: checkboxes.length };
+          },
+          args: [exercicio.blocks]
+        });
+        await new Promise(r => setTimeout(r, 400));
+
+        // Preenche feedback (Resposta correta / Resposta incorreta)
+        const feedbackFillRes = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (correct, incorrect) => {
+            const toHtml = (raw) => {
+              const text = String(raw || "");
+              const esc = (s) => s
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+              const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+              if (!parts.length) return "";
+              return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+            };
+            function fillCM(cmEl, text) {
+              if (!cmEl?.CodeMirror) return false;
+              const cm = cmEl.CodeMirror;
+              // Força foco real no input interno para ativar estado CodeMirror-focused
+              cm.focus();
+              try {
+                const input = cm.getInputField ? cm.getInputField() : (cm.display?.input?.getField?.() || cm.display?.input?.textarea);
+                if (input) {
+                  input.focus();
+                  input.dispatchEvent(new Event("focus", { bubbles: true }));
+                }
+                cm.getWrapperElement()?.classList.add("CodeMirror-focused");
+              } catch (_) {}
+              cm.setValue(text);
+              cm.save();
+              cm.getWrapperElement()?.dispatchEvent(new Event("input", { bubbles: true }));
+              cm.getWrapperElement()?.dispatchEvent(new Event("change", { bubbles: true }));
+              const hackeditor = cmEl.closest(".hackeditor");
+              if (hackeditor) {
+                const ta = hackeditor.querySelector("textarea.markdownEditor-source");
+                if (ta) { ta.value = text; ta.dispatchEvent(new Event("input", { bubbles: true })); ta.dispatchEvent(new Event("change", { bubbles: true })); }
+                const hidden = hackeditor.querySelector("input.hackeditor-sync");
+                if (hidden) {
+                  hidden.value = toHtml(text);
+                  hidden.dispatchEvent(new Event("input", { bubbles: true }));
+                  hidden.dispatchEvent(new Event("change", { bubbles: true }));
+                }
+              }
+              return true;
+            }
+            function fillByRoot(rootSel, text) {
+              const root = document.querySelector(rootSel);
+              if (!root) return false;
+              const cmEl = root.querySelector(".CodeMirror");
+              if (fillCM(cmEl, text)) return true;
+              const plain = root.querySelector("textarea, input");
+              if (plain) {
+                plain.value = text;
+                plain.dispatchEvent(new Event("input", { bubbles: true }));
+                plain.dispatchEvent(new Event("change", { bubbles: true }));
+                return true;
+              }
+              return false;
+            }
+            function fillByName(names, text) {
+              for (const n of names) {
+                const el = document.querySelector(`textarea[name="${n}"], input[name="${n}"], input[type="hidden"][name="${n}"]`);
+                if (el) {
+                  const isHighlighted = /highlighted/i.test(n) || el.type === "hidden";
+                  el.value = isHighlighted ? toHtml(text) : text;
+                  el.dispatchEvent(new Event("input", { bubbles: true }));
+                  el.dispatchEvent(new Event("change", { bubbles: true }));
+                  return true;
+                }
+              }
+              return false;
+            }
+            const correctCM   = document.querySelector("#opinion .CodeMirror, #correctFeedback .CodeMirror, #successFeedback .CodeMirror, [id*='opinion'] .CodeMirror, [id*='correct'] .CodeMirror, [id*='success'] .CodeMirror");
+            const incorrectCM = document.querySelector("#wrongOpinion .CodeMirror, #incorrectFeedback .CodeMirror, #failureFeedback .CodeMirror, [id*='wrongOpinion'] .CodeMirror, [id*='incorrect'] .CodeMirror, [id*='failure'] .CodeMirror");
+            const correctNames   = ["opinion","opinionHighlighted","correctFeedback","successFeedback","correct_feedback","correctMessage","hit","answerFeedback","rightFeedback","feedbackRight"];
+            const incorrectNames = ["wrongOpinion","wrongOpinionHighlighted","incorrectFeedback","failureFeedback","incorrect_feedback","incorrectMessage","miss","wrongFeedback","feedbackWrong","errorFeedback"];
+            const rC = fillByRoot("#opinion", correct) || fillCM(correctCM, correct) || fillByName(correctNames, correct);
+            const rI = fillByRoot("#wrongOpinion", incorrect) || fillCM(incorrectCM, incorrect) || fillByName(incorrectNames, incorrect);
+            return { rC, rI, correctLen: (correct || "").length, incorrectLen: (incorrect || "").length };
+          },
+          args: [exercicio.respostaCorreta, exercicio.respostaIncorreta]
+        });
+        feedbackDebug = feedbackFillRes?.[0]?.result || null;
+
+        const feedbackReadRes = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: () => {
+            const getCm = (sel) => {
+              const cmEl = document.querySelector(sel);
+              if (!cmEl?.CodeMirror) return null;
+              const v = cmEl.CodeMirror.getValue() || "";
+              return { len: v.length, sample: v.slice(0, 80) };
+            };
+            const getVal = (sel) => {
+              const el = document.querySelector(sel);
+              if (!el) return null;
+              const v = el.value || "";
+              return { len: v.length, sample: v.slice(0, 80) };
+            };
+            return {
+              cmOpinion: getCm("#opinion .CodeMirror"),
+              cmWrongOpinion: getCm("#wrongOpinion .CodeMirror"),
+              taOpinion: getVal('textarea[name="opinion"]'),
+              taWrongOpinion: getVal('textarea[name="wrongOpinion"]'),
+              hiddenOpinion: getVal('input[name="opinionHighlighted"], input[name="opinion"]'),
+              hiddenWrongOpinion: getVal('input[name="wrongOpinionHighlighted"], input[name="wrongOpinion"]'),
+            };
+          }
+        });
+        feedbackDebug = {
+          ...(feedbackDebug || {}),
+          readback: feedbackReadRes?.[0]?.result || null
+        };
+        await new Promise(r => setTimeout(r, 400));
+      }
+
+      // Múltipla/Única escolha: clica "Adicionar alternativa" N vezes, preenche e marca a correta
+      if (exercicio.tipo === "multipla" && exercicio.alts?.length) {
+        // Espera o botão "Adicionar alternativa" aparecer
+        for (let i = 0; i < 15; i++) {
+          const r = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => !!document.querySelector('.add-alternative')
+          });
+          if (r?.[0]?.result) break;
+          await new Promise(r => setTimeout(r, 150));
+        }
+        // Clica "Adicionar alternativa" via jQuery (mesmo contexto dos handlers da Alura)
+        const targetCount = exercicio.alts.length;
+        for (let attempt = 0; attempt < targetCount + 5; attempt++) {
+          const countRes = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: () => {
+              const container = document.getElementById("alternatives");
+              if (!container) return 0;
+              return container.querySelectorAll(":scope > .fieldGroup-alternative").length;
+            }
+          });
+          const current = countRes?.[0]?.result || 0;
+          if (current >= targetCount) break;
+          await chrome.scripting.executeScript({
+            target: { tabId },
+            world: "MAIN",
+            func: () => {
+              const $btn = window.jQuery?.('.add-alternative[data-type="emptySingleAlternative"]');
+              if ($btn && $btn.length) {
+                $btn.trigger("click");
+                return "jquery";
+              }
+              const btn = document.querySelector('.add-alternative[data-type="emptySingleAlternative"]') ||
+                          document.querySelector('.add-alternative');
+              btn?.click();
+              return btn ? "native" : "none";
+            }
+          });
+          await new Promise(r => setTimeout(r, 500));
+        }
+        await new Promise(r => setTimeout(r, 200));
+
+        // Preenche texto + opinion de cada alternativa e marca a correta
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: (alts, correctLetter) => {
+            const letters = ["A","B","C","D","E"];
+            const toHtml = (raw) => {
+              const text = String(raw || "");
+              const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+              const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+              if (!parts.length) return "";
+              return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+            };
+
+            function fillByName(textareaName, hiddenName, text) {
+              const ta = document.querySelector(`textarea[name="${textareaName}"]`);
+              if (!ta) return false;
+              // Acha o .hackeditor/.markdownEditor ancestral e o CodeMirror dentro
+              const editor = ta.closest(".markdownEditor") || ta.closest(".hackeditor") || ta.parentElement;
+              const cmEl = editor?.querySelector(".CodeMirror");
+              if (cmEl?.CodeMirror) {
+                cmEl.CodeMirror.focus();
+                cmEl.CodeMirror.setValue(text);
+                cmEl.CodeMirror.save();
+              }
+              ta.value = text;
+              ta.dispatchEvent(new Event("input", { bubbles: true }));
+              ta.dispatchEvent(new Event("change", { bubbles: true }));
+              const hidden = document.querySelector(`input.hackeditor-sync[name="${hiddenName}"]`);
+              if (hidden) {
+                hidden.value = toHtml(text);
+                hidden.dispatchEvent(new Event("input", { bubbles: true }));
+                hidden.dispatchEvent(new Event("change", { bubbles: true }));
+              }
+              return true;
+            }
+
+            let filled = 0, opinions = 0;
+            alts.forEach((alt, i) => {
+              if (fillByName(`alternatives[${i}].text`, `alternatives[${i}].textHighlighted`, alt.text || "")) filled++;
+              if (fillByName(`alternatives[${i}].opinion`, `alternatives[${i}].opinionHighlighted`, alt.opinion || "")) opinions++;
+            });
+
+            // Marca a alternativa correta via radio input[name="alternatives[N].correct"]
+            const correctIdx = letters.indexOf((correctLetter || "").toUpperCase());
+            let radioMarked = false;
+            if (correctIdx >= 0) {
+              const radio = document.querySelector(`input[type="radio"][name="alternatives[${correctIdx}].correct"]`);
+              if (radio && !radio.checked) {
+                radio.click();
+                radioMarked = true;
+              }
+            }
+            return { filled, opinions, correctIdx, radioMarked, total: alts.length };
+          },
+          args: [exercicio.alts, exercicio.correctAlt]
+        });
+        await new Promise(r => setTimeout(r, 800));
+      }
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: (correct, incorrect) => {
+          const toHtml = (raw) => {
+            const text = String(raw || "");
+            const esc = (s) => s
+              .replace(/&/g, "&amp;")
+              .replace(/</g, "&lt;")
+              .replace(/>/g, "&gt;");
+            const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+            if (!parts.length) return "";
+            return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+          };
+          const setVal = (sel, v) => {
+            const el = document.querySelector(sel);
+            if (!el) return;
+            el.value = v;
+            el.dispatchEvent(new Event("input", { bubbles: true }));
+            el.dispatchEvent(new Event("change", { bubbles: true }));
+            el.dispatchEvent(new Event("blur", { bubbles: true }));
+          };
+          setVal('input[name="opinionHighlighted"]', toHtml(correct));
+          setVal('input[name="wrongOpinionHighlighted"]', toHtml(incorrect));
+          setVal('textarea[name="opinion"]', correct);
+          setVal('textarea[name="wrongOpinion"]', incorrect);
+        },
+        args: [exercicio.respostaCorreta || "", exercicio.respostaIncorreta || ""]
+      });
+      await new Promise(r => setTimeout(r, 1000));
+
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => { document.querySelector("#submitTask")?.click(); }
+      });
+      await new Promise(r => setTimeout(r, 2500));
+      sendResponse({ ok: true, debugFeedback: feedbackDebug || null });
+
+    } catch (e) {
+      sendResponse({ ok: false, error: e?.message || String(e) });
+    } finally {
+      if (tabId != null) { await new Promise(r => setTimeout(r, 500)); chrome.tabs.remove(tabId).catch(() => {}); }
+    }
+  })();
+
+  return true;
+});

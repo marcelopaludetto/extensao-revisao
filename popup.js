@@ -847,6 +847,66 @@ async function readDocxAsText(file) {
   return parseDocumentXml(xml, numFormats);
 }
 
+function parseDocumentXmlStructured(xml, numFormats = {}) {
+  const listCounters = {};
+  const rows = [];
+  let pos = 0;
+
+  while (pos < xml.length) {
+    const pOpen = xml.indexOf("<w:p", pos);
+    if (pOpen < 0) break;
+    const nCh = xml[pOpen + 4];
+    if (nCh !== ">" && nCh !== " " && nCh !== "/") { pos = pOpen + 4; continue; }
+
+    const tagClose = xml.indexOf(">", pOpen);
+    if (tagClose < 0) break;
+    if (xml[tagClose - 1] === "/") { rows.push({ style: "", text: "" }); pos = tagClose + 1; continue; }
+
+    const pClose = xml.indexOf("</w:p>", tagClose + 1);
+    if (pClose < 0) break;
+    const body = xml.slice(tagClose + 1, pClose);
+
+    const styleM = body.match(/<w:pStyle[^>]*w:val="([^"]+)"/);
+    const style = styleM?.[1] || "";
+
+    let prefix = "";
+    const numPrStart = body.indexOf("<w:numPr>");
+    const numPrEnd   = body.indexOf("</w:numPr>");
+    if (numPrStart >= 0 && numPrEnd > numPrStart) {
+      const numPrBody = body.slice(numPrStart + 9, numPrEnd);
+      const numIdM = numPrBody.match(/<w:numId w:val="(\d+)"/);
+      const ilvlM  = numPrBody.match(/<w:ilvl w:val="(\d+)"/);
+      const numId  = numIdM?.[1] ?? "0";
+      const ilvl   = ilvlM?.[1]  ?? "0";
+      const key    = `${numId}:${ilvl}`;
+      const fmt    = numFormats[numId]?.[ilvl] || "decimal";
+      const indent = "  ".repeat(+ilvl);
+      if (fmt === "bullet") {
+        prefix = indent + "- ";
+      } else {
+        listCounters[key] = (listCounters[key] ?? 0) + 1;
+        prefix = indent + listCounters[key] + ". ";
+      }
+    }
+
+    const rawText = extractParagraphText(body).replace(/\*{4,}/g, "**");
+    const text = decodeXmlEntities(prefix + rawText).trimEnd();
+    rows.push({ style, text });
+    pos = pClose + 6;
+  }
+  return rows;
+}
+
+async function readDocxStructured(file) {
+  const buffer = await file.arrayBuffer();
+  const bytes = new Uint8Array(buffer);
+  const xml = await extractZipEntry(bytes, "word/document.xml");
+  if (!xml) return null;
+  const numberingXml = await extractZipEntry(bytes, "word/numbering.xml");
+  const numFormats = parseNumberingXml(numberingXml);
+  return parseDocumentXmlStructured(xml, numFormats);
+}
+
 // ---------- Publicação: carregar arquivo ----------
 const pubFileInput = document.getElementById("pub-file-input");
 const pubDropArea = document.getElementById("pub-drop-area");
@@ -1521,6 +1581,420 @@ if (avalDropArea) {
     e.preventDefault();
     avalDropArea.classList.remove("drag-over");
     await handleAvalFile(e.dataTransfer.files[0]);
+  });
+}
+
+// ---------- Exercícios: parser ----------
+function parseExercDoc(rows) {
+  const exercises = [];
+  let aulaNum = 0;
+  let aulaTitle = "";
+  let q = null;
+  let collectingEnunciado = false;
+  let currentAltLetter = null;
+  let currentAltText = "";
+  let inGabarito = false;
+  let collectingFeedback = null; // "correta" | "incorreta" | null
+  let collectingAltOpinionLetter = null;
+
+  const stripStars = (s) => s.replace(/\*/g, "");
+  const normalizeLine = (s) => s
+    .replace(/[\u00A0\u202F]/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+
+  function flushAlt() {
+    if (!q || !currentAltLetter) return;
+    if (!q.alts) q.alts = [];
+    q.alts.push({ letter: currentAltLetter, text: currentAltText.trim() });
+    currentAltLetter = null;
+    currentAltText = "";
+  }
+
+  function flushQuestion() {
+    if (!q) return;
+    flushAlt();
+    // Split alts inline: ex. "A) texto1.B) texto2. C) texto3." → 3 alts separadas
+    if (q.alts?.length) {
+      const nextOf = { A: "B", B: "C", C: "D", D: "E" };
+      const expanded = [];
+      for (const a of q.alts) {
+        let letter = a.letter;
+        let rest = a.text;
+        while (letter in nextOf) {
+          // Match "B)", "C)" etc — com ou sem espaço antes (às vezes vem grudado após ponto final)
+          const re = new RegExp(`\\s*${nextOf[letter]}\\)\\s+`);
+          const m = rest.match(re);
+          if (!m) break;
+          expanded.push({ letter, text: rest.slice(0, m.index).trim() });
+          letter = nextOf[letter];
+          rest = rest.slice(m.index + m[0].length);
+        }
+        expanded.push({ letter, text: rest.trim() });
+      }
+      q.alts = expanded;
+    }
+    if (q.altOpinions && q.alts?.length) {
+      q.alts = q.alts.map((a) => ({ ...a, opinion: (q.altOpinions[a.letter] || "").trim() }));
+    }
+    q.enunciado = q.enunciado.join("\n\n").trim();
+    if (!q.tipo) q.tipo = "multipla";
+    exercises.push(q);
+    q = null;
+    collectingEnunciado = false;
+    currentAltLetter = null;
+    currentAltText = "";
+    inGabarito = false;
+    collectingFeedback = null;
+    collectingAltOpinionLetter = null;
+  }
+
+  for (let i = 0; i < rows.length; i++) {
+    const { style, text } = rows[i];
+    const t = normalizeLine(text);
+    const s = stripStars(t);
+
+    if (style === "Aula") {
+      if (/^Aula\s+\d+$/i.test(t)) {
+        flushQuestion();
+        aulaNum = parseInt(t.match(/\d+/)[0]);
+        const nextRow = rows[i + 1];
+        if (nextRow && nextRow.style === "Aula") {
+          aulaTitle = nextRow.text.trim();
+          i++;
+        }
+      }
+      continue;
+    }
+
+    const qMatch = s.match(/^Questão\s+(\d+)\s*[-–—]\s*(.+)$/i);
+    if (qMatch) {
+      flushQuestion();
+      q = {
+        aulaNum, aulaTitle,
+        questNum: parseInt(qMatch[1]),
+        questNome: qMatch[2].trim(),
+        tipo: null,
+        enunciado: [],
+        blocks: [],
+        sequenciaCorreta: "",
+        respostaCorreta: "",
+        respostaIncorreta: "",
+        alts: [],
+        altOpinions: {},
+        correctAlt: null,
+      };
+      collectingEnunciado = true;
+      inGabarito = false;
+      collectingFeedback = null;
+      collectingAltOpinionLetter = null;
+      continue;
+    }
+
+    if (!q || !t) continue;
+
+    if (style === "Blocos") {
+      q.tipo = "ordenar";
+      collectingEnunciado = false;
+      q.blocks.push(t);
+      continue;
+    }
+
+    const seqM = s.match(/^Sequ[eê]ncia correta\s*[:：]\s*(.+)/i);
+    if (seqM) {
+      q.sequenciaCorreta = seqM[1].trim();
+      collectingEnunciado = false;
+      collectingFeedback = null;
+      collectingAltOpinionLetter = null;
+      // Se blocos ainda não foram detectados por estilo "Blocos", infere pelos
+      // últimos N parágrafos do enunciado (N = itens da sequência correta)
+      if (q.blocks.length === 0) {
+        q.tipo = "ordenar";
+        const parts = q.sequenciaCorreta.split(/\s*\|\s*/).filter(Boolean);
+        const n = parts.length;
+        if (n > 0 && q.enunciado.length >= n) {
+          q.blocks = q.enunciado.splice(q.enunciado.length - n, n);
+        }
+      }
+      continue;
+    }
+
+    if (/^Plataforma$/i.test(s)) continue;
+
+    const rcM = s.match(/^Resposta correta\s*[:：]\s*(.*)$/i);
+    if (rcM) {
+      q.respostaCorreta = rcM[1].trim();
+      inGabarito = true;
+      collectingEnunciado = false;
+      collectingFeedback = "correta";
+      collectingAltOpinionLetter = null;
+      continue;
+    }
+
+    const riM = s.match(/^Resposta incorreta\s*[:：]\s*(.*)$/i);
+    if (riM) {
+      q.respostaIncorreta = riM[1].trim();
+      inGabarito = true;
+      collectingEnunciado = false;
+      collectingFeedback = "incorreta";
+      collectingAltOpinionLetter = null;
+      continue;
+    }
+
+    if (collectingFeedback) {
+      const isMarker =
+        /^Plataforma$/i.test(s) ||
+        /^Resposta correta\s*[:：]/i.test(s) ||
+        /^Resposta incorreta\s*[:：]/i.test(s) ||
+        /^Questão\s+\d+\s*[-–—]/i.test(s) ||
+        /^Alternativa\s+([A-E])[,. ]+(correta|incorreta)/i.test(s) ||
+        /^Sequ[eê]ncia correta\s*[:：]/i.test(s);
+
+      if (isMarker) collectingFeedback = null;
+      else {
+        const key = collectingFeedback === "correta" ? "respostaCorreta" : "respostaIncorreta";
+        q[key] = q[key] ? `${q[key]}\n${t}` : t;
+        continue;
+      }
+    }
+
+    const gabM = s.match(/^Alternativa\s+([A-E])\s*[,.:\-–— ]+\s*(correta|incorreta)\s*[.,:\-–—]*\s*(.*)$/i);
+    if (gabM) {
+      const letter = gabM[1].toUpperCase();
+      if (/^correta$/i.test(gabM[2])) q.correctAlt = letter;
+      const firstOpinionLine = (gabM[3] || "").trim();
+      if (firstOpinionLine) q.altOpinions[letter] = firstOpinionLine;
+      collectingAltOpinionLetter = letter;
+      if (!q.tipo) q.tipo = "multipla";
+      flushAlt();
+      inGabarito = true;
+      collectingEnunciado = false;
+      collectingFeedback = null;
+      continue;
+    }
+
+    if (inGabarito && collectingAltOpinionLetter) {
+      const isMarker =
+        /^Plataforma$/i.test(s) ||
+        /^Resposta correta\s*[:：]/i.test(s) ||
+        /^Resposta incorreta\s*[:：]/i.test(s) ||
+        /^Questão\s+\d+\s*[-–—]/i.test(s) ||
+        /^Alternativa\s+[A-E]\s*[,.:\-–— ]+\s*(correta|incorreta)/i.test(s) ||
+        /^Sequ[eê]ncia correta\s*[:：]/i.test(s);
+      if (!isMarker) {
+        const prev = q.altOpinions[collectingAltOpinionLetter] || "";
+        q.altOpinions[collectingAltOpinionLetter] = prev ? `${prev}\n${t}` : t;
+        continue;
+      }
+    }
+
+    if (inGabarito) continue;
+
+    const altM = t.match(/^([A-E])\)\s+([\s\S]+)/);
+    if (altM) {
+      flushAlt();
+      currentAltLetter = altM[1];
+      currentAltText = altM[2];
+      if (!q.tipo) q.tipo = "multipla";
+      collectingEnunciado = false;
+      continue;
+    }
+
+    if (currentAltLetter) { currentAltText += "\n" + t; continue; }
+
+    if (collectingEnunciado && !/^Unidade$/i.test(s)) {
+      q.enunciado.push(t);
+    }
+  }
+
+  flushQuestion();
+  return exercises;
+}
+
+// ---------- Exercícios: renderização ----------
+let exercCourseId = "";
+
+function renderExercCards(exercises) {
+  const container = document.getElementById("exerc-cards");
+  container.innerHTML = "";
+  const esc = (s) => String(s || "")
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  exercises.forEach((ex, idx) => {
+    const card = document.createElement("div");
+    card.className = "aval-card";
+    const typeLabel = ex.tipo === "ordenar" ? "Ordenar Blocos" : "Única Escolha";
+    const typeColor = ex.tipo === "ordenar" ? "#3D6CE2" : "#9761FF";
+
+    let itemsHtml = "";
+    if (ex.tipo === "ordenar") {
+      itemsHtml = (ex.blocks || []).map((b, i) =>
+        `<div class="aval-card-alt">${i + 1}. ${esc(b)}</div>`
+      ).join("");
+    } else {
+      itemsHtml = (ex.alts || []).map((a) => {
+        const isCorrect = ex.correctAlt && a.letter === ex.correctAlt;
+        const style = isCorrect ? "color:#1a7f37;font-weight:700;" : "";
+        const mark = isCorrect ? " ✓" : "";
+        return `<div class="aval-card-alt" style="${style}">${a.letter}) ${esc(a.text)}${mark}</div>`;
+      }).join("");
+    }
+
+    card.innerHTML = `
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+        <span class="aval-card-label" style="margin:0">Aula ${ex.aulaNum} · Q${ex.questNum}</span>
+        <span style="font-size:10px;font-weight:700;color:${typeColor};text-transform:uppercase;letter-spacing:.5px;">${typeLabel}</span>
+      </div>
+      <div style="font-size:12px;font-weight:700;color:#0d1117;margin-bottom:4px;">${esc(ex.questNome)}</div>
+      <div class="aval-card-text" style="margin-bottom:6px;">${esc(ex.enunciado || "").replace(/\n/g, "<br>")}</div>
+      ${itemsHtml}
+      <div class="aval-card-footer">
+        <button class="aval-fill-btn exerc-criar-btn" data-idx="${idx}">Criar</button>
+        <span class="aval-fill-status" id="exerc-card-status-${idx}"></span>
+      </div>
+    `;
+
+    container.appendChild(card);
+  });
+
+  container.querySelectorAll(".exerc-criar-btn:not(:disabled)").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const idx = parseInt(btn.dataset.idx);
+      const ex = exercises[idx];
+      const statusEl = document.getElementById(`exerc-card-status-${idx}`);
+      if (!exercCourseId) { statusEl.textContent = "ID do curso não encontrado no nome do arquivo."; statusEl.style.color = "#CA3328"; return; }
+      btn.disabled = true;
+      btn.textContent = "Criando…";
+      statusEl.textContent = "";
+      try {
+        const tab = await getActiveTab();
+        if (!tab?.url?.includes("cursos.alura.com.br")) {
+          throw new Error("Abra uma aba em cursos.alura.com.br");
+        }
+        const resp = await chrome.tabs.sendMessage(tab.id, {
+          type: "ALURA_REVISOR_CREATE_EXERCICIO",
+          courseId: exercCourseId,
+          lessonNum: ex.aulaNum,
+          exercicio: ex,
+        });
+        if (resp?.ok) {
+          btn.textContent = "✓ Criado";
+          btn.classList.add("done");
+          const dbg = resp?.debugFeedback;
+          if (dbg?.readback) {
+            const cLen = dbg.readback?.cmOpinion?.len ?? dbg.readback?.taOpinion?.len ?? dbg.readback?.hiddenOpinion?.len ?? 0;
+            const iLen = dbg.readback?.cmWrongOpinion?.len ?? dbg.readback?.taWrongOpinion?.len ?? dbg.readback?.hiddenWrongOpinion?.len ?? 0;
+            statusEl.textContent = `ok · debug C:${cLen} I:${iLen}`;
+            statusEl.title = JSON.stringify(dbg.readback);
+            statusEl.style.whiteSpace = "normal";
+          } else {
+            statusEl.textContent = "ok";
+          }
+          statusEl.style.color = "#56A145";
+        } else {
+          btn.disabled = false;
+          btn.textContent = "Criar";
+          statusEl.textContent = resp?.error || "sem resposta do content script";
+          statusEl.style.color = "#CA3328";
+          statusEl.style.whiteSpace = "normal";
+        }
+      } catch (e) {
+        btn.disabled = false;
+        btn.textContent = "Criar";
+        statusEl.textContent = e.message;
+        statusEl.style.color = "#CA3328";
+        statusEl.style.whiteSpace = "normal";
+      }
+    });
+  });
+
+  // Botão "Publicar todos os exercícios"
+  const allBtn = document.getElementById("exerc-all-btn");
+  if (allBtn) {
+    allBtn.style.display = exercises.length > 1 ? "" : "none";
+    allBtn.disabled = false;
+    allBtn.textContent = "Publicar todos os exercícios";
+  }
+  exercCurrentList = exercises;
+}
+
+let exercCurrentList = [];
+
+const exercAllBtn = document.getElementById("exerc-all-btn");
+const exercAllStatus = document.getElementById("exerc-all-status");
+if (exercAllBtn) {
+  exercAllBtn.addEventListener("click", async () => {
+    if (!exercCurrentList.length) return;
+    exercAllBtn.disabled = true;
+    let done = 0, fail = 0;
+    for (let i = 0; i < exercCurrentList.length; i++) {
+      const btn = document.querySelector(`.exerc-criar-btn[data-idx="${i}"]`);
+      if (!btn || btn.disabled) continue;
+      exercAllStatus.textContent = `Publicando ${i + 1}/${exercCurrentList.length}…`;
+      btn.click();
+      // Espera o botão mudar pra "✓ Criado" ou voltar pra "Criar"
+      await new Promise((resolve) => {
+        const check = () => {
+          if (btn.classList.contains("done") || (!btn.disabled && btn.textContent === "Criar")) resolve();
+          else setTimeout(check, 500);
+        };
+        setTimeout(check, 500);
+      });
+      if (btn.classList.contains("done")) done++; else fail++;
+    }
+    exercAllStatus.textContent = `Finalizado: ${done} ok, ${fail} falhou(aram).`;
+    exercAllBtn.disabled = false;
+  });
+}
+
+// ---------- Exercícios: carregar arquivo ----------
+const exercFileInput = document.getElementById("exerc-file-input");
+const exercDropArea  = document.getElementById("exerc-drop-area");
+const exercStatusEl  = document.getElementById("exerc-status");
+
+async function handleExercFile(file) {
+  if (!file) return;
+  exercStatusEl.textContent = "";
+  exercStatusEl.style.color = "#CA3328";
+
+  if (!file.name.match(/\.(docx|doc)$/i)) {
+    exercStatusEl.textContent = "Selecione um arquivo .docx";
+    return;
+  }
+
+  const courseIdMatch = file.name.match(/\[(\d+)\]/);
+  exercCourseId = courseIdMatch?.[1] || "";
+
+  exercDropArea.querySelector("span").textContent = `📄 ${file.name}`;
+  exercStatusEl.style.color = "#F79722";
+  exercStatusEl.textContent = "Lendo arquivo…";
+
+  const rows = await readDocxStructured(file);
+  if (!rows) {
+    exercStatusEl.textContent = "Não foi possível ler o arquivo.";
+    return;
+  }
+
+  const exercises = parseExercDoc(rows);
+  if (!exercises.length) {
+    exercStatusEl.textContent = "Nenhum exercício encontrado.";
+    return;
+  }
+
+  exercStatusEl.style.color = "#56A145";
+  exercStatusEl.textContent = `${exercises.length} exercício(s) encontrado(s)${exercCourseId ? ` · curso ${exercCourseId}` : ""}.`;
+  renderExercCards(exercises);
+}
+
+if (exercFileInput) exercFileInput.addEventListener("change", (e) => handleExercFile(e.target.files[0]));
+
+if (exercDropArea) {
+  exercDropArea.addEventListener("dragover", (e) => { e.preventDefault(); exercDropArea.classList.add("drag-over"); });
+  exercDropArea.addEventListener("dragleave", () => exercDropArea.classList.remove("drag-over"));
+  exercDropArea.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    exercDropArea.classList.remove("drag-over");
+    await handleExercFile(e.dataTransfer.files[0]);
   });
 }
 
