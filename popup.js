@@ -252,6 +252,32 @@ if (githubTokenSaveBtn) {
   });
 }
 
+// ---------- Credenciais R2 ----------
+const R2_ACCESS_KEY_STORAGE = "r2AccessKey";
+const R2_SECRET_KEY_STORAGE = "r2SecretKey";
+const r2AccessKeyEl = document.getElementById("r2-access-key");
+const r2SecretKeyEl = document.getElementById("r2-secret-key");
+const r2SaveBtn = document.getElementById("r2-save-btn");
+const r2StatusEl = document.getElementById("r2-status");
+
+chrome.storage.local.get([R2_ACCESS_KEY_STORAGE, R2_SECRET_KEY_STORAGE], r => {
+  if (r[R2_ACCESS_KEY_STORAGE]) r2AccessKeyEl.value = r[R2_ACCESS_KEY_STORAGE];
+  if (r[R2_SECRET_KEY_STORAGE]) r2SecretKeyEl.value = r[R2_SECRET_KEY_STORAGE];
+});
+
+if (r2SaveBtn) {
+  r2SaveBtn.addEventListener("click", async () => {
+    const ak = r2AccessKeyEl.value.trim();
+    const sk = r2SecretKeyEl.value.trim();
+    await chrome.storage.local.set({
+      [R2_ACCESS_KEY_STORAGE]: ak,
+      [R2_SECRET_KEY_STORAGE]: sk,
+    });
+    r2StatusEl.textContent = (ak && sk) ? "✅ Credenciais salvas." : "Credenciais removidas.";
+    setTimeout(() => { r2StatusEl.textContent = ""; }, 2000);
+  });
+}
+
 // Intercepta links com data-open-tab para abrir sem fechar o popup
 document.addEventListener("click", e => {
   const a = e.target.closest("a[data-open-tab]");
@@ -424,13 +450,15 @@ deactConfirmBtn?.addEventListener("click", async () => {
 const tabReviewBtn = document.getElementById("tab-review-btn");
 const tabToolsBtn = document.getElementById("tab-tools-btn");
 const tabPublishBtn = document.getElementById("tab-publish-btn");
+const tabEditorialBtn = document.getElementById("tab-editorial-btn");
 const tabReview = document.getElementById("tab-review");
 const tabTools = document.getElementById("tab-tools");
 const tabPublish = document.getElementById("tab-publish");
+const tabEditorial = document.getElementById("tab-editorial");
 
 function switchTab(active) {
-  [tabReviewBtn, tabToolsBtn, tabPublishBtn].forEach(b => b.classList.remove("active"));
-  [tabReview, tabTools, tabPublish].forEach(p => p.style.display = "none");
+  [tabReviewBtn, tabToolsBtn, tabPublishBtn, tabEditorialBtn].forEach(b => b.classList.remove("active"));
+  [tabReview, tabTools, tabPublish, tabEditorial].forEach(p => p.style.display = "none");
   active.btn.classList.add("active");
   active.panel.style.display = "";
 }
@@ -438,6 +466,636 @@ function switchTab(active) {
 tabReviewBtn.addEventListener("click", () => switchTab({ btn: tabReviewBtn, panel: tabReview }));
 tabToolsBtn.addEventListener("click", () => switchTab({ btn: tabToolsBtn, panel: tabTools }));
 tabPublishBtn.addEventListener("click", () => switchTab({ btn: tabPublishBtn, panel: tabPublish }));
+tabEditorialBtn.addEventListener("click", () => switchTab({ btn: tabEditorialBtn, panel: tabEditorial }));
+
+// ---------- Material editorial ----------
+const EDIT_BASE_URL = "http://cdn3.gnarususercontent.com.br/Material-de-apoio-Start-2026";
+const R2_ENDPOINT = "https://4986a99d4a6ebf7ab87ee6461d95b58b.r2.cloudflarestorage.com";
+const R2_BUCKET = "gnarus-content";
+const R2_PREFIX = "Material-de-apoio-Start-2026";
+const R2_REGION = "auto";
+
+// ---------- SigV4 (AWS) ----------
+async function sha256Hex(data) {
+  const buf = typeof data === "string" ? new TextEncoder().encode(data) : data;
+  const hash = await crypto.subtle.digest("SHA-256", buf);
+  return [...new Uint8Array(hash)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function hmac(keyBytes, msg) {
+  const key = await crypto.subtle.importKey(
+    "raw", keyBytes, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]
+  );
+  const sig = await crypto.subtle.sign("HMAC", key, new TextEncoder().encode(msg));
+  return new Uint8Array(sig);
+}
+function hex(bytes) {
+  return [...bytes].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+function encodeUriSegment(s) {
+  return encodeURIComponent(s).replace(/[!'()*]/g, c =>
+    "%" + c.charCodeAt(0).toString(16).toUpperCase()
+  );
+}
+async function signR2Request({ method, key, body, contentType, accessKey, secretKey }) {
+  const host = new URL(R2_ENDPOINT).host;
+  const canonicalUri = "/" + encodeUriSegment(R2_BUCKET) + "/" +
+    key.split("/").map(encodeUriSegment).join("/");
+  const now = new Date();
+  const amzDate = now.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  const dateStamp = amzDate.slice(0, 8);
+
+  const payloadHash = await sha256Hex(body);
+
+  const headers = {
+    "host": host,
+    "x-amz-content-sha256": payloadHash,
+    "x-amz-date": amzDate,
+  };
+  if (contentType) headers["content-type"] = contentType;
+
+  const sortedHeaderKeys = Object.keys(headers).sort();
+  const canonicalHeaders = sortedHeaderKeys.map(k => `${k}:${headers[k]}\n`).join("");
+  const signedHeaders = sortedHeaderKeys.join(";");
+
+  const canonicalRequest = [
+    method,
+    canonicalUri,
+    "",
+    canonicalHeaders,
+    signedHeaders,
+    payloadHash,
+  ].join("\n");
+
+  const scope = `${dateStamp}/${R2_REGION}/s3/aws4_request`;
+  const stringToSign = [
+    "AWS4-HMAC-SHA256",
+    amzDate,
+    scope,
+    await sha256Hex(canonicalRequest),
+  ].join("\n");
+
+  const kDate = await hmac(new TextEncoder().encode("AWS4" + secretKey), dateStamp);
+  const kRegion = await hmac(kDate, R2_REGION);
+  const kService = await hmac(kRegion, "s3");
+  const kSigning = await hmac(kService, "aws4_request");
+  const signature = hex(await hmac(kSigning, stringToSign));
+
+  const authorization = `AWS4-HMAC-SHA256 Credential=${accessKey}/${scope}, SignedHeaders=${signedHeaders}, Signature=${signature}`;
+
+  return {
+    url: R2_ENDPOINT + canonicalUri,
+    headers: { ...headers, "Authorization": authorization },
+  };
+}
+
+async function uploadToR2(file, objectKey, accessKey, secretKey) {
+  const body = await file.arrayBuffer();
+  const contentType = file.type || "application/pdf";
+  const { url, headers } = await signR2Request({
+    method: "PUT",
+    key: objectKey,
+    body,
+    contentType,
+    accessKey,
+    secretKey,
+  });
+  const res = await fetch(url, { method: "PUT", headers, body });
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`${res.status} ${res.statusText}: ${text.slice(0, 200)}`);
+  }
+}
+
+const EDIT_FOLDER_KEY = "editorialFolderName";
+const editFolderInput = document.getElementById("edit-folder");
+const editFileInput = document.getElementById("edit-file-input");
+const editDropArea = document.getElementById("edit-drop-area");
+const editFilesEl = document.getElementById("edit-files");
+const editUploadAllBtn = document.getElementById("edit-upload-all-btn");
+const editPublishBtn = document.getElementById("edit-publish-btn");
+const editCourseIdLabel = document.getElementById("edit-course-id-label");
+const editGlobalStatus = document.getElementById("edit-global-status");
+const editPublishLog = document.getElementById("edit-publish-log");
+
+function extractCourseId(folder) {
+  const m = (folder || "").match(/^\s*\[?\s*(\d+)/);
+  return m ? m[1] : "";
+}
+
+let editorialFiles = []; // [{ name, subfolder }]
+
+chrome.storage.local.get([EDIT_FOLDER_KEY], r => {
+  if (r[EDIT_FOLDER_KEY]) editFolderInput.value = r[EDIT_FOLDER_KEY];
+  editCourseIdLabel.textContent = extractCourseId(editFolderInput.value) || "-";
+});
+
+editFolderInput.addEventListener("input", () => {
+  chrome.storage.local.set({ [EDIT_FOLDER_KEY]: editFolderInput.value.trim() });
+  editCourseIdLabel.textContent = extractCourseId(editFolderInput.value) || "-";
+  renderEditorialCards();
+});
+
+editFolderInput.addEventListener("blur", () => {
+  const v = editFolderInput.value;
+  const normalized = normalizeCourseFolder(v);
+  if (normalized && normalized !== v) {
+    editFolderInput.value = normalized;
+    chrome.storage.local.set({ [EDIT_FOLDER_KEY]: normalized });
+    renderEditorialCards();
+  }
+});
+
+function normalizeCourseFolder(raw) {
+  if (!raw) return "";
+  // Remove acentos
+  let s = raw.normalize("NFD").replace(/[̀-ͯ]/g, "");
+  // Captura ID no começo: "[4756] ...", "4756 ..." ou "4756-..."
+  const idMatch = s.match(/^\s*\[?\s*(\d+)\s*\]?\s*[-\s]+(.*)$/);
+  let id = "", rest = s.trim();
+  if (idMatch) { id = idMatch[1]; rest = idMatch[2].trim(); }
+  // Quebra em palavras (separadores: espaço, traços, múltiplos)
+  const words = rest.split(/[\s\-]+/).filter(Boolean);
+  if (words.length === 0) return id;
+  // Primeira palavra capitalizada (preserva caixa original), demais em minúsculas
+  const first = words[0];
+  const tail = words.slice(1).map(w => w.toLowerCase());
+  const slug = [first, ...tail].join("-");
+  return id ? `${id}-${slug}` : slug;
+}
+
+function detectSubfolder(name, relPath) {
+  // Prioriza subpasta do caminho (quando o usuário seleciona a pasta inteira)
+  if (relPath) {
+    const parts = relPath.split("/").slice(0, -1); // remove o arquivo
+    for (const p of parts) {
+      const up = p.toUpperCase();
+      if (up.startsWith("SLIDE")) return "Slides";
+      if (up.startsWith("EXERCICIO") || up.startsWith("EXERCÍCIO")) return "Exercicios";
+      if (up.startsWith("DESAFIO")) return "Desafios";
+    }
+  }
+  const up = name.toUpperCase();
+  if (up.includes("SLIDE")) return "Slides";
+  if (up.includes("EXERCICIO") || up.includes("EXERCÍCIO")) return "Exercicios";
+  if (up.includes("DESAFIO")) return "Desafios";
+  return "Slides";
+}
+
+function buildEditorialUrl(folder, subfolder, filename) {
+  const raw = (folder || "").trim().replace(/^\/+|\/+$/g, "");
+  if (!raw) return "";
+  const f = normalizeCourseFolder(raw);
+  return `${EDIT_BASE_URL}/${f}/${subfolder}/${filename}`;
+}
+
+function buildObjectKey(folder, subfolder, filename) {
+  return `${R2_PREFIX}/${normalizeCourseFolder(folder)}/${subfolder}/${filename}`;
+}
+
+async function publishEditorialItem(idx) {
+  const item = editorialFiles[idx];
+  const folder = editFolderInput.value.trim();
+  const courseId = extractCourseId(folder);
+  if (!courseId) { editGlobalStatus.textContent = "Pasta sem ID de curso."; return; }
+  const aula = extractAulaNumber(item.name);
+  if (aula === 9999) { editGlobalStatus.textContent = `Arquivo sem AULA##: ${item.name}`; return; }
+  const cls = classifyMaterial(item.name);
+  if (!cls) { editGlobalStatus.textContent = `Padrão não reconhecido: ${item.name}`; return; }
+
+  item.pubStatus = "publishing";
+  renderEditorialCards();
+  try {
+    const map = await fetchSectionsMap(courseId);
+    const sectionId = map[aula];
+    if (!sectionId) throw new Error(`Aula ${aula} não encontrada no curso ${courseId}`);
+    const link = buildEditorialUrl(folder, item.subfolder, item.name);
+    await publishMaterialsForSection(courseId, sectionId, [{ ...cls, link }]);
+    item.pubStatus = "done";
+    logPublish(`✓ Aula ${aula}: "${cls.title}" publicado.`);
+  } catch (e) {
+    item.pubStatus = "error";
+    item.pubError = e.message || String(e);
+    logPublish(`✗ ${item.name}: ${item.pubError}`);
+  }
+  renderEditorialCards();
+}
+
+async function uploadEditorialItem(idx) {
+  const item = editorialFiles[idx];
+  const folder = editFolderInput.value.trim();
+  if (!folder) { editGlobalStatus.textContent = "Informe a pasta do curso."; return; }
+  const { r2AccessKey, r2SecretKey } = await chrome.storage.local.get(["r2AccessKey", "r2SecretKey"]);
+  if (!r2AccessKey || !r2SecretKey) {
+    editGlobalStatus.textContent = "Configure as credenciais R2 na aba Ferramentas.";
+    return;
+  }
+  item.status = "uploading";
+  item.error = "";
+  renderEditorialCards();
+  try {
+    const key = buildObjectKey(folder, item.subfolder, item.name);
+    await uploadToR2(item.file, key, r2AccessKey, r2SecretKey);
+    item.status = "done";
+  } catch (e) {
+    item.status = "error";
+    item.error = e.message || String(e);
+  }
+  renderEditorialCards();
+}
+
+function renderEditorialCards() {
+  editFilesEl.innerHTML = "";
+  if (editorialFiles.length === 0) {
+    editUploadAllBtn.style.display = "none";
+    editPublishBtn.style.display = "none";
+    return;
+  }
+  editorialFiles.forEach((item, idx) => {
+    const card = document.createElement("div");
+    card.className = "edit-card";
+
+    const fn = document.createElement("div");
+    fn.className = "edit-card-filename";
+    fn.textContent = item.name;
+    card.appendChild(fn);
+
+    const row = document.createElement("div");
+    row.className = "edit-card-row";
+
+    const sel = document.createElement("select");
+    sel.className = "edit-card-select";
+    ["Slides", "Exercicios", "Desafios"].forEach(opt => {
+      const o = document.createElement("option");
+      o.value = opt;
+      o.textContent = opt;
+      if (opt === item.subfolder) o.selected = true;
+      sel.appendChild(o);
+    });
+    sel.addEventListener("change", () => {
+      editorialFiles[idx].subfolder = sel.value;
+      sortEditorialFiles();
+      renderEditorialCards();
+    });
+    row.appendChild(sel);
+
+    const upBtn = document.createElement("button");
+    upBtn.className = "edit-card-copy";
+    upBtn.style.background = "#F79722";
+    upBtn.style.color = "#0d1117";
+    if (item.status === "uploading") { upBtn.textContent = "…"; upBtn.disabled = true; }
+    else if (item.status === "done") { upBtn.textContent = "✓ OK"; upBtn.style.background = "#56A145"; upBtn.style.color = "#fff"; }
+    else if (item.status === "error") { upBtn.textContent = "Tentar"; upBtn.style.background = "#CA3328"; upBtn.style.color = "#fff"; }
+    else upBtn.textContent = "Upload";
+    upBtn.addEventListener("click", () => uploadEditorialItem(idx));
+    row.appendChild(upBtn);
+
+    const url = buildEditorialUrl(editFolderInput.value, item.subfolder, item.name);
+    const pubBtn = document.createElement("button");
+    pubBtn.className = "edit-card-copy";
+    pubBtn.style.background = "#9761FF";
+    pubBtn.style.color = "#fff";
+    if (item.pubStatus === "publishing") { pubBtn.textContent = "…"; pubBtn.disabled = true; }
+    else if (item.pubStatus === "done") { pubBtn.textContent = "✓ Pub"; pubBtn.style.background = "#56A145"; }
+    else if (item.pubStatus === "error") { pubBtn.textContent = "Tentar"; pubBtn.style.background = "#CA3328"; }
+    else pubBtn.textContent = "Publicar";
+    pubBtn.addEventListener("click", () => publishEditorialItem(idx));
+    row.appendChild(pubBtn);
+
+    const rm = document.createElement("button");
+    rm.className = "edit-card-remove";
+    rm.textContent = "×";
+    rm.title = "Remover";
+    rm.addEventListener("click", () => {
+      editorialFiles.splice(idx, 1);
+      renderEditorialCards();
+    });
+    row.appendChild(rm);
+
+    card.appendChild(row);
+
+    const urlEl = document.createElement("div");
+    urlEl.className = "edit-card-url";
+    urlEl.textContent = url || "(informe a pasta do curso acima)";
+    card.appendChild(urlEl);
+
+    if (item.status === "error" && item.error) {
+      const errEl = document.createElement("div");
+      errEl.style.cssText = "font-size:10px;color:#CA3328;word-break:break-all;";
+      errEl.textContent = "Erro: " + item.error;
+      card.appendChild(errEl);
+    }
+
+    editFilesEl.appendChild(card);
+  });
+  editUploadAllBtn.style.display = "";
+  editPublishBtn.style.display = "";
+}
+
+// ---------- Publicar materiais nas aulas (admin Alura) ----------
+function classifyMaterial(name) {
+  const up = name.toUpperCase();
+  const isProf = /PROF/.test(up);
+  const isAluno = /ALUNO/.test(up);
+  if (up.includes("SLIDE") && isProf) return { title: "Guia do professor", role: "TEACHER" };
+  if (up.includes("SLIDE") && isAluno) return { title: "Slides - Estudantes", role: "ALL_USERS" };
+  if ((up.includes("EXERCICIO") || up.includes("EXERCÍCIO")) && isProf) return { title: "Gabarito do professor", role: "TEACHER" };
+  if ((up.includes("EXERCICIO") || up.includes("EXERCÍCIO")) && isAluno) return { title: "Lista de exercícios", role: "ALL_USERS" };
+  if (up.includes("DESAFIO")) return { title: "Desafio comentado - Professor", role: "TEACHER" };
+  return null;
+}
+
+function logPublish(msg) {
+  editPublishLog.textContent += msg + "\n";
+  editPublishLog.scrollTop = editPublishLog.scrollHeight;
+}
+
+async function fetchSectionsMap(courseId) {
+  const res = await fetch(`https://cursos.alura.com.br/admin/courses/v2/${courseId}/sections`, {
+    credentials: "include",
+  });
+  if (!res.ok) throw new Error(`Falha ao listar sections: ${res.status}`);
+  const html = await res.text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const map = {}; // aulaNumber -> sectionId
+  doc.querySelectorAll("tbody tr[id]").forEach(tr => {
+    const sectionId = tr.id;
+    const tds = tr.querySelectorAll("td");
+    if (tds.length >= 2) {
+      const n = parseInt(tds[1].textContent.trim(), 10);
+      if (!isNaN(n)) map[n] = sectionId;
+    }
+  });
+  return map;
+}
+
+async function openAluraTab(url, timeoutMs = 20000) {
+  const tab = await chrome.tabs.create({ url, active: false });
+  const tabId = tab.id;
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("timeout ao carregar " + url)), timeoutMs);
+    chrome.tabs.onUpdated.addListener(function listener(id, info) {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    });
+  });
+  return tabId;
+}
+
+async function publishMaterialsForSection(courseId, sectionId, materials) {
+  const editUrl = `https://cursos.alura.com.br/admin/courses/v2/${courseId}/sections/${sectionId}`;
+  const tabId = await openAluraTab(editUrl);
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [materials],
+      func: async (materials) => {
+        const sleep = ms => new Promise(r => setTimeout(r, ms));
+        const setNative = (el, value) => {
+          const proto = el.tagName === "SELECT" ? HTMLSelectElement.prototype : HTMLInputElement.prototype;
+          const setter = Object.getOwnPropertyDescriptor(proto, "value").set;
+          setter.call(el, value);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          el.dispatchEvent(new Event("change", { bubbles: true }));
+        };
+
+        const addBtn = document.querySelector("#addNewSupportMaterial");
+        if (!addBtn) return { ok: false, error: "Botão #addNewSupportMaterial não encontrado." };
+
+        // Conta quantas linhas já existem na lista de novos materiais (geralmente 0)
+        const listSel = ".support-material-list";
+        const listEl = document.querySelector(listSel);
+        if (!listEl) return { ok: false, error: "Div .support-material-list não encontrada." };
+        const startCount = listEl.querySelectorAll(".row").length;
+
+        for (let i = 0; i < materials.length; i++) {
+          addBtn.click();
+          await sleep(150);
+        }
+
+        // Aguarda as linhas aparecerem
+        let tries = 0;
+        while (listEl.querySelectorAll(".row").length < startCount + materials.length && tries++ < 30) {
+          await sleep(100);
+        }
+
+        const rows = [...listEl.querySelectorAll(".row")].slice(startCount);
+        if (rows.length !== materials.length) {
+          return { ok: false, error: `Esperava ${materials.length} linhas novas, achou ${rows.length}.` };
+        }
+
+        materials.forEach((m, i) => {
+          const row = rows[i];
+          const titleEl = row.querySelector('input[name$=".title"]');
+          const linkEl = row.querySelector('input[name$=".link"]');
+          const roleEl = row.querySelector('select[name$=".userAccessRole"]');
+          if (!titleEl || !linkEl || !roleEl) throw new Error(`Campos não encontrados na linha ${i}`);
+          setNative(titleEl, m.title);
+          setNative(linkEl, m.link);
+          setNative(roleEl, m.role);
+        });
+
+        await sleep(300);
+
+        // Submete o form nativo (mesmo mecanismo que o botão Salvar da página usa)
+        const form = addBtn.closest("form") || document.querySelector("form");
+        if (!form) return { ok: false, error: "Form não encontrado." };
+        const submitBtn =
+          form.querySelector("#submit-form__button") ||
+          form.querySelector("button[type='submit']") ||
+          form.querySelector("input[type='submit']");
+        if (!submitBtn) return { ok: false, error: "Botão salvar não encontrado." };
+        submitBtn.click();
+
+        return { ok: true, added: materials.length };
+      },
+    });
+    const r = results?.[0]?.result;
+    if (!r?.ok) throw new Error(r?.error || "Falha ao injetar materiais.");
+    // Aguarda a submissão terminar (redirect/reload)
+    await new Promise(res => setTimeout(res, 2500));
+  } finally {
+    chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+if (editPublishBtn) {
+  editPublishBtn.addEventListener("click", async () => {
+    const folder = editFolderInput.value.trim();
+    const courseId = extractCourseId(folder);
+    if (!courseId) { editGlobalStatus.textContent = "Pasta sem ID de curso (prefixo numérico)."; return; }
+    if (!editorialFiles.length) return;
+
+    editPublishBtn.disabled = true;
+    editPublishLog.textContent = "";
+    logPublish(`Buscando sections do curso ${courseId}…`);
+
+    let sectionsMap;
+    try {
+      sectionsMap = await fetchSectionsMap(courseId);
+    } catch (e) {
+      logPublish(`ERRO: ${e.message}`);
+      editPublishBtn.disabled = false;
+      return;
+    }
+    logPublish(`${Object.keys(sectionsMap).length} aulas encontradas.`);
+
+    // Agrupa materiais por número de aula
+    const byAula = {};
+    for (const item of editorialFiles) {
+      const aula = extractAulaNumber(item.name);
+      if (aula === 9999) { logPublish(`Ignorado (sem AULA##): ${item.name}`); continue; }
+      const cls = classifyMaterial(item.name);
+      if (!cls) { logPublish(`Ignorado (padrão não reconhecido): ${item.name}`); continue; }
+      const link = buildEditorialUrl(folder, item.subfolder, item.name);
+      (byAula[aula] ||= []).push({ ...cls, link });
+    }
+    if (!Object.keys(byAula).length) {
+      logPublish("Nenhum material válido encontrado.");
+      editPublishBtn.disabled = false;
+      return;
+    }
+
+    let okCount = 0, failCount = 0;
+    for (const aulaStr of Object.keys(byAula).sort((a, b) => +a - +b)) {
+      const aula = parseInt(aulaStr, 10);
+      const sectionId = sectionsMap[aula];
+      const mats = byAula[aula];
+      if (!sectionId) { logPublish(`Aula ${aula}: section não encontrada — pulado (${mats.length} materiais).`); failCount++; continue; }
+      logPublish(`Aula ${aula} (section ${sectionId}): enviando ${mats.length} material(is)…`);
+      try {
+        await publishMaterialsForSection(courseId, sectionId, mats);
+        logPublish(`Aula ${aula}: OK`);
+        okCount++;
+      } catch (e) {
+        logPublish(`Aula ${aula}: ERRO — ${e.message}`);
+        failCount++;
+      }
+    }
+    logPublish(`\nConcluído: ${okCount} aula(s) OK, ${failCount} com erro.`);
+    editPublishBtn.disabled = false;
+  });
+}
+
+if (editUploadAllBtn) {
+  editUploadAllBtn.addEventListener("click", async () => {
+    const folder = editFolderInput.value.trim();
+    if (!folder) { editGlobalStatus.textContent = "Informe a pasta do curso."; return; }
+    const { r2AccessKey, r2SecretKey } = await chrome.storage.local.get(["r2AccessKey", "r2SecretKey"]);
+    if (!r2AccessKey || !r2SecretKey) {
+      editGlobalStatus.textContent = "Configure as credenciais R2 na aba Ferramentas.";
+      return;
+    }
+    editUploadAllBtn.disabled = true;
+    let done = 0, fail = 0;
+    for (let i = 0; i < editorialFiles.length; i++) {
+      if (editorialFiles[i].status === "done") { done++; continue; }
+      editGlobalStatus.textContent = `Enviando ${i + 1}/${editorialFiles.length}…`;
+      await uploadEditorialItem(i);
+      if (editorialFiles[i].status === "done") done++;
+      else if (editorialFiles[i].status === "error") fail++;
+    }
+    editUploadAllBtn.disabled = false;
+    editGlobalStatus.textContent = `Concluído: ${done} ok, ${fail} com erro.`;
+  });
+}
+
+function extractAulaNumber(name) {
+  const m = name.match(/AULA\s*0*(\d+)/i);
+  return m ? parseInt(m[1], 10) : 9999;
+}
+
+const SUBFOLDER_ORDER = { "Slides": 0, "Exercicios": 1, "Desafios": 2 };
+
+function sortEditorialFiles() {
+  editorialFiles.sort((a, b) => {
+    const aa = extractAulaNumber(a.name);
+    const bb = extractAulaNumber(b.name);
+    if (aa !== bb) return aa - bb;
+    const sa = SUBFOLDER_ORDER[a.subfolder] ?? 99;
+    const sb = SUBFOLDER_ORDER[b.subfolder] ?? 99;
+    if (sa !== sb) return sa - sb;
+    return a.name.localeCompare(b.name);
+  });
+}
+
+function addEditorialFiles(fileList) {
+  let detectedRoot = "";
+  for (const f of fileList) {
+    const relPath = f.webkitRelativePath || "";
+    if (relPath && !detectedRoot) { detectedRoot = relPath.split("/")[0]; break; }
+  }
+  if (detectedRoot) {
+    const normalized = normalizeCourseFolder(detectedRoot);
+    if (normalized && normalized !== editFolderInput.value.trim()) {
+      editorialFiles = [];
+    }
+  }
+  for (const f of fileList) {
+    if (!/\.pdf$/i.test(f.name)) continue;
+    const relPath = f.webkitRelativePath || "";
+    if (editorialFiles.some(x => x.name === f.name && x.relPath === relPath)) continue;
+    editorialFiles.push({
+      name: f.name,
+      relPath,
+      subfolder: detectSubfolder(f.name, relPath),
+      file: f,
+      status: "idle", // idle | uploading | done | error
+      error: "",
+    });
+  }
+  sortEditorialFiles();
+  if (detectedRoot) {
+    const normalized = normalizeCourseFolder(detectedRoot);
+    if (normalized && normalized !== editFolderInput.value.trim()) {
+      editFolderInput.value = normalized;
+      chrome.storage.local.set({ [EDIT_FOLDER_KEY]: normalized });
+    }
+  }
+  renderEditorialCards();
+}
+
+editFileInput.addEventListener("change", e => {
+  addEditorialFiles(e.target.files);
+  editFileInput.value = "";
+});
+
+async function collectFilesFromEntry(entry, out) {
+  if (entry.isFile) {
+    await new Promise(res => entry.file(f => {
+      try { Object.defineProperty(f, "webkitRelativePath", { value: entry.fullPath.replace(/^\//, "") }); } catch {}
+      out.push(f);
+      res();
+    }));
+  } else if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const entries = await new Promise(res => reader.readEntries(res));
+    for (const e of entries) await collectFilesFromEntry(e, out);
+  }
+}
+
+editDropArea.addEventListener("dragover", e => {
+  e.preventDefault();
+  editDropArea.classList.add("drag-over");
+});
+editDropArea.addEventListener("dragleave", () => editDropArea.classList.remove("drag-over"));
+editDropArea.addEventListener("drop", async e => {
+  e.preventDefault();
+  editDropArea.classList.remove("drag-over");
+  const items = e.dataTransfer.items;
+  if (items && items.length && items[0].webkitGetAsEntry) {
+    const collected = [];
+    for (const it of items) {
+      const entry = it.webkitGetAsEntry();
+      if (entry) await collectFilesFromEntry(entry, collected);
+    }
+    addEditorialFiles(collected);
+  } else if (e.dataTransfer.files?.length) {
+    addEditorialFiles(e.dataTransfer.files);
+  }
+});
 
 // ---------- Publicação: conversão para Markdown ----------
 function textToMarkdown(text) {
