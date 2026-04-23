@@ -32,6 +32,11 @@
       "run_at": "document_idle"
     },
     {
+      "matches": ["https://cursos.alura.com.br/*"],
+      "js": ["content-panel.js"],
+      "run_at": "document_idle"
+    },
+    {
       "matches": ["https://www.dropbox.com/*"],
       "js": ["content-dropbox.js"],
       "run_at": "document_idle"
@@ -41,6 +46,10 @@
     {
       "resources": ["icons/*.svg"],
       "matches": ["https://cursos.alura.com.br/*", "https://www.dropbox.com/*"]
+    },
+    {
+      "resources": ["popup.html", "popup.js"],
+      "matches": ["https://cursos.alura.com.br/*"]
     }
   ],
   "browser_specific_settings": {

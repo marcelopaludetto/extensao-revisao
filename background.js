@@ -1,3 +1,34 @@
+const ALURA_ORIGIN = "https://cursos.alura.com.br";
+
+function applyActionPopupForTab(tab) {
+  if (!tab || !tab.id) return;
+  const isAlura = (tab.url || "").startsWith(ALURA_ORIGIN);
+  try {
+    chrome.action.setPopup({ tabId: tab.id, popup: isAlura ? "" : "popup.html" });
+  } catch (_) {}
+}
+
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  if (changeInfo.status === "loading" || changeInfo.url) applyActionPopupForTab(tab);
+});
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  chrome.tabs.get(tabId, (tab) => { if (!chrome.runtime.lastError) applyActionPopupForTab(tab); });
+});
+chrome.runtime.onInstalled.addListener(() => {
+  chrome.tabs.query({}, (tabs) => tabs.forEach(applyActionPopupForTab));
+});
+chrome.runtime.onStartup.addListener(() => {
+  chrome.tabs.query({}, (tabs) => tabs.forEach(applyActionPopupForTab));
+});
+
+chrome.action.onClicked.addListener((tab) => {
+  if (!tab || !tab.id) return;
+  if (!(tab.url || "").startsWith(ALURA_ORIGIN)) return;
+  chrome.tabs.sendMessage(tab.id, { type: "ALURA_REVISOR_TOGGLE_PANEL" }, () => {
+    void chrome.runtime.lastError;
+  });
+});
+
 let _credentialsConfig = null;
 
 async function getCredentialsConfig() {
