@@ -1162,6 +1162,8 @@ function textToMarkdown(text) {
 // ---------- Publicação: parsing ----------
 function parseDesafioDoc(text) {
   text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Desembrulha linhas 100% em negrito (ex.: "**Aula 1**", "**Para saber mais...!**")
+  text = text.replace(/^\*\*(.+?)\*\*\s*$/gm, "$1");
   const lessons = [];
 
   // Divide o documento a cada "Aula N" no início de uma linha
@@ -1565,6 +1567,298 @@ async function readDocxStructured(file) {
   return parseDocumentXmlStructured(xml, numFormats);
 }
 
+// ---------- Publicação: Imagens (upload em lote no R2) ----------
+const IMG_BASE_URL = "http://cdn3.gnarususercontent.com.br/start-content";
+const IMG_R2_PREFIX = "start-content";
+
+// Reescreve links de imagem em markdown `![alt](arquivo.png)` para a URL do CDN.
+// Também reconhece o formato sem parênteses que o Word exporta: `![alt] aula1-FCF-09`
+// — nesse caso, resolve a extensão via mapa de stems (nome sem extensão → nome real)
+// vindo das imagens já subidas para o curso.
+const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)(\?.*)?$/i;
+const IMG_EXT_STRIP_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+
+function stemMapFromFilenames(filenames) {
+  const map = {};
+  for (const n of filenames || []) {
+    const stem = n.replace(IMG_EXT_STRIP_RE, "");
+    map[stem] = n;
+    map[n] = n; // também aceita o nome completo como chave
+  }
+  return map;
+}
+
+async function getImgStemMap(courseId) {
+  if (!courseId) return {};
+  const key = `imgStems_${courseId}`;
+  const r = await chrome.storage.local.get([key]);
+  return stemMapFromFilenames(r[key] || []);
+}
+
+function rewriteImageLinks(text, courseId, stemMap) {
+  if (!text || !courseId) return text;
+
+  // Caso 1: `![alt](url ou nome.ext)`
+  text = text.replace(/(!\[[^\]]*\]\()\s*([^)\s]+)\s*(\))/g, (m, pre, url, post) => {
+    if (/^https?:\/\//i.test(url)) {
+      if (!IMG_EXT_RE.test(url)) return m;
+      if (url.startsWith(IMG_BASE_URL + "/")) return m;
+      const filename = url.split("?")[0].split("#")[0].split("/").pop();
+      if (!filename) return m;
+      return `${pre}${IMG_BASE_URL}/${courseId}-imagens/${filename}${post}`;
+    }
+    const token = url.split(/[\\/]/).pop();
+    if (!token) return m;
+    if (IMG_EXT_RE.test(token)) {
+      return `${pre}${IMG_BASE_URL}/${courseId}-imagens/${token}${post}`;
+    }
+    // Sem extensão — tenta resolver pelo stemMap
+    if (stemMap && stemMap[token]) {
+      return `${pre}${IMG_BASE_URL}/${courseId}-imagens/${stemMap[token]}${post}`;
+    }
+    return m;
+  });
+
+  // Caso 2: `![alt]<espaço|quebra>arquivo` (sem parênteses — formato exportado do Word)
+  // Se o token já tem extensão de imagem, reescreve direto.
+  // Senão, tenta resolver pelo stemMap (nomes das imagens subidas).
+  text = text.replace(/!\[([^\]]*)\][ \t]*\n?[ \t]*([A-Za-z0-9][A-Za-z0-9_.\-]*)/g, (m, alt, token) => {
+    if (IMG_EXT_RE.test(token)) {
+      return `![${alt}](${IMG_BASE_URL}/${courseId}-imagens/${token})`;
+    }
+    if (stemMap && (stemMap[token] || stemMap[token.replace(IMG_EXT_STRIP_RE, "")])) {
+      const fn = stemMap[token] || stemMap[token.replace(IMG_EXT_STRIP_RE, "")];
+      return `![${alt}](${IMG_BASE_URL}/${courseId}-imagens/${fn})`;
+    }
+    return m;
+  });
+
+  return text;
+}
+
+async function rewriteImagesDeepAsync(value, courseId) {
+  const stemMap = await getImgStemMap(courseId);
+  function walk(v) {
+    if (typeof v === "string") return rewriteImageLinks(v, courseId, stemMap);
+    if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = walk(v[i]); return v; }
+    if (v && typeof v === "object") {
+      for (const k of Object.keys(v)) v[k] = walk(v[k]);
+      return v;
+    }
+    return v;
+  }
+  return walk(value);
+}
+
+// Mantém versão sync por compatibilidade (sem stemMap → só caso 1 com extensão)
+function rewriteImagesDeep(value, courseId) {
+  if (!courseId) return value;
+  if (typeof value === "string") return rewriteImageLinks(value, courseId, null);
+  if (Array.isArray(value)) { for (let i = 0; i < value.length; i++) value[i] = rewriteImagesDeep(value[i], courseId); return value; }
+  if (value && typeof value === "object") {
+    for (const k of Object.keys(value)) value[k] = rewriteImagesDeep(value[k], courseId);
+    return value;
+  }
+  return value;
+}
+
+const imgFileInput    = document.getElementById("img-file-input");
+const imgDropArea     = document.getElementById("img-drop-area");
+const imgCourseInfo   = document.getElementById("img-course-info");
+const imgCourseIdDisp = document.getElementById("img-course-id-display");
+const imgFileCount    = document.getElementById("img-file-count");
+const imgFilesEl      = document.getElementById("img-files");
+const imgUploadAllBtn = document.getElementById("img-upload-all-btn");
+const imgGlobalStatus = document.getElementById("img-global-status");
+
+let imgFiles = [];    // [{ file, name, status, error, url }]
+let imgCourseId = "";
+
+function extractIdFromFolderName(folderName) {
+  const m = (folderName || "").match(/^\s*\[?\s*(\d+)\s*\]?/);
+  return m ? m[1] : "";
+}
+
+function getImgCourseIdFromFiles(fileList) {
+  // webkitRelativePath: "[4761] imagens/aula4-FCF-11.png"
+  for (const f of fileList) {
+    const rel = f.webkitRelativePath || "";
+    const top = rel.split("/")[0];
+    const id = extractIdFromFolderName(top);
+    if (id) return id;
+  }
+  return "";
+}
+
+function buildImgObjectKey(courseId, filename) {
+  return `${IMG_R2_PREFIX}/${courseId}-imagens/${filename}`;
+}
+
+function buildImgUrl(courseId, filename) {
+  return `${IMG_BASE_URL}/${courseId}-imagens/${filename}`;
+}
+
+function handleImgFileList(fileList) {
+  const arr = [...fileList].filter(f => /^image\//.test(f.type) || /\.(png|jpe?g|gif|webp|svg)$/i.test(f.name));
+  if (arr.length === 0) {
+    imgGlobalStatus.textContent = "Nenhuma imagem encontrada na pasta.";
+    return;
+  }
+  imgCourseId = getImgCourseIdFromFiles(arr);
+  imgFiles = arr.map(f => ({ file: f, name: f.name, status: "pending", error: "", url: "" }));
+  if (imgCourseId) {
+    chrome.storage.local.set({ [`imgStems_${imgCourseId}`]: imgFiles.map(f => f.name) });
+  }
+  imgCourseIdDisp.textContent = imgCourseId || "(não encontrado — a pasta precisa começar com [ID])";
+  imgFileCount.textContent = `${imgFiles.length} imagem(ns)`;
+  imgCourseInfo.style.display = "";
+  imgGlobalStatus.textContent = "";
+  renderImgCards();
+}
+
+async function uploadImgItem(idx) {
+  const item = imgFiles[idx];
+  if (!imgCourseId) { imgGlobalStatus.textContent = "Pasta sem ID de curso."; return; }
+  const { r2AccessKey, r2SecretKey } = await chrome.storage.local.get(["r2AccessKey", "r2SecretKey"]);
+  if (!r2AccessKey || !r2SecretKey) {
+    imgGlobalStatus.textContent = "Configure as credenciais R2 na aba Ferramentas.";
+    return;
+  }
+  item.status = "uploading";
+  item.error = "";
+  renderImgCards();
+  try {
+    const key = buildImgObjectKey(imgCourseId, item.name);
+    await uploadToR2(item.file, key, r2AccessKey, r2SecretKey);
+    item.status = "done";
+    item.url = buildImgUrl(imgCourseId, item.name);
+  } catch (e) {
+    item.status = "error";
+    item.error = e.message || String(e);
+  }
+  renderImgCards();
+}
+
+function renderImgCards() {
+  imgFilesEl.innerHTML = "";
+  if (imgFiles.length === 0) {
+    imgUploadAllBtn.style.display = "none";
+    return;
+  }
+  imgUploadAllBtn.style.display = "";
+
+  imgFiles.forEach((item, idx) => {
+    const card = document.createElement("div");
+    card.className = "edit-card";
+
+    const fn = document.createElement("div");
+    fn.className = "edit-card-filename";
+    fn.textContent = item.name;
+    card.appendChild(fn);
+
+    const row = document.createElement("div");
+    row.className = "edit-card-row";
+
+    const upBtn = document.createElement("button");
+    upBtn.className = "edit-card-copy";
+    upBtn.style.background = "#F79722";
+    upBtn.style.color = "#0d1117";
+    if (item.status === "uploading") { upBtn.textContent = "…"; upBtn.disabled = true; }
+    else if (item.status === "done") { upBtn.textContent = "✓ OK"; upBtn.style.background = "#56A145"; upBtn.style.color = "#fff"; }
+    else if (item.status === "error") { upBtn.textContent = "Tentar"; upBtn.style.background = "#CA3328"; upBtn.style.color = "#fff"; }
+    else upBtn.textContent = "Upload";
+    upBtn.addEventListener("click", () => uploadImgItem(idx));
+    row.appendChild(upBtn);
+
+    const url = item.url || (imgCourseId ? buildImgUrl(imgCourseId, item.name) : "");
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "edit-card-copy";
+    copyBtn.textContent = "Copiar URL";
+    copyBtn.addEventListener("click", () => {
+      if (!url) return;
+      navigator.clipboard.writeText(url);
+      copyBtn.textContent = "✓ Copiado";
+      copyBtn.classList.add("done");
+      setTimeout(() => { copyBtn.textContent = "Copiar URL"; copyBtn.classList.remove("done"); }, 1200);
+    });
+    row.appendChild(copyBtn);
+
+    const rm = document.createElement("button");
+    rm.className = "edit-card-remove";
+    rm.textContent = "×";
+    rm.title = "Remover";
+    rm.addEventListener("click", () => {
+      imgFiles.splice(idx, 1);
+      renderImgCards();
+    });
+    row.appendChild(rm);
+
+    card.appendChild(row);
+
+    const urlEl = document.createElement("div");
+    urlEl.className = "edit-card-url";
+    urlEl.textContent = url || "(pasta sem [ID])";
+    card.appendChild(urlEl);
+
+    if (item.status === "error" && item.error) {
+      const err = document.createElement("div");
+      err.style.cssText = "font-size:11px;color:#CA3328;margin-top:4px;";
+      err.textContent = item.error;
+      card.appendChild(err);
+    }
+
+    imgFilesEl.appendChild(card);
+  });
+}
+
+if (imgFileInput) {
+  imgFileInput.addEventListener("change", (e) => handleImgFileList(e.target.files));
+}
+
+async function collectFilesFromDataTransfer(dt) {
+  const out = [];
+  const items = dt.items ? [...dt.items] : [];
+  const entries = items.map(it => it.webkitGetAsEntry?.()).filter(Boolean);
+  if (entries.length === 0) return [...dt.files];
+
+  async function walk(entry, pathPrefix) {
+    if (entry.isFile) {
+      await new Promise(res => entry.file(f => {
+        try { Object.defineProperty(f, "webkitRelativePath", { value: pathPrefix + f.name }); } catch {}
+        out.push(f);
+        res();
+      }));
+    } else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      const children = await new Promise(res => reader.readEntries(res));
+      for (const c of children) await walk(c, pathPrefix + entry.name + "/");
+    }
+  }
+  for (const e of entries) await walk(e, "");
+  return out;
+}
+
+if (imgDropArea) {
+  imgDropArea.addEventListener("dragover", (e) => { e.preventDefault(); imgDropArea.classList.add("drag-over"); });
+  imgDropArea.addEventListener("dragleave", () => imgDropArea.classList.remove("drag-over"));
+  imgDropArea.addEventListener("drop", async (e) => {
+    e.preventDefault();
+    imgDropArea.classList.remove("drag-over");
+    const files = await collectFilesFromDataTransfer(e.dataTransfer);
+    handleImgFileList(files);
+  });
+}
+
+if (imgUploadAllBtn) {
+  imgUploadAllBtn.addEventListener("click", async () => {
+    if (!imgFiles.length) return;
+    imgUploadAllBtn.disabled = true;
+    const tasks = imgFiles.map((it, i) => it.status !== "done" ? uploadImgItem(i) : null).filter(Boolean);
+    await Promise.allSettled(tasks);
+    imgUploadAllBtn.disabled = false;
+  });
+}
+
 // ---------- Publicação: carregar arquivo ----------
 const pubFileInput = document.getElementById("pub-file-input");
 const pubDropArea = document.getElementById("pub-drop-area");
@@ -1597,6 +1891,7 @@ async function handleDesafioFile(file) {
   }
 
   pubLessons = parseDesafioDoc(text);
+  await rewriteImagesDeepAsync(pubLessons, pubCourseId);
   pubCourseIdDisplay.textContent = pubCourseId || "(não encontrado no nome do arquivo)";
   pubLessonCount.textContent = `${pubLessons.length} aula(s)`;
   pubCourseInfo.style.display = "";
@@ -1815,6 +2110,7 @@ async function handleFezFile(file) {
   }
 
   fezLessons = parseFezDoc(text);
+  await rewriteImagesDeepAsync(fezLessons, fezCourseId);
 
   // DEBUG — mostra direto no popup
   const fezDebugEl = document.getElementById("fez-debug");
@@ -2195,6 +2491,8 @@ async function handleAvalFile(file) {
   container.appendChild(rawPreview);
 
   const parsed = parseAvalDoc(text);
+  const avalCourseIdMatch = file.name.match(/\[(\d+)\]/);
+  if (avalCourseIdMatch) await rewriteImagesDeepAsync(parsed, avalCourseIdMatch[1]);
   if (!parsed.title) { avalStatusEl.textContent = "Não encontrei texto no documento."; return; }
 
   avalStatusEl.textContent = `${parsed.questions.length} questão(ões) encontrada(s).`;
@@ -2637,6 +2935,7 @@ async function handleExercFile(file) {
   }
 
   const exercises = parseExercDoc(rows);
+  await rewriteImagesDeepAsync(exercises, exercCourseId);
   if (!exercises.length) {
     exercStatusEl.textContent = "Nenhum exercício encontrado.";
     return;
