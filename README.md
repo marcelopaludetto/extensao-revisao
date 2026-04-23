@@ -1,242 +1,314 @@
-# Start — Facilitadora de Revisão
+# Start Revisor
 
-Extensão de navegador para equipes de conteúdo da Alura.
-Automatiza revisão de cursos, auditoria de transcrições, publicação de atividades e desativação em lote.
+Extensão de navegador (MV3) para a equipe de conteúdo da Alura. Automatiza revisão de cursos, auditoria de transcrições/legendas, upload de ícones e materiais, publicação de desafios, atividades, avaliações e exercícios.
 
-> Compatível com Chrome e Edge (Chromium). Funciona em `cursos.alura.com.br`.
+> Compatível com Chrome, Edge e Firefox (v121+). Roda em `cursos.alura.com.br`.
 
 ---
 
 ## Instalação
 
-1. Baixe o repositório: botão verde **Code → Download ZIP**
-2. Extraia o ZIP em uma pasta permanente (não mova depois de instalar)
-3. Abra o gerenciador de extensões no navegador
-4. Ative o **Modo do desenvolvedor**
-5. Clique em **Carregar sem compactação** e selecione a pasta extraída
-6. A extensão aparece na barra do navegador
-
-Para atualizar: extraia o novo ZIP na mesma pasta e clique em **Recarregar** no gerenciador de extensões. Um banner de aviso aparece automaticamente quando há nova versão disponível.
+1. Baixe este repositório (**Code → Download ZIP**) ou use `atualizar.bat` (puxa `main` direto do GitHub).
+2. Extraia numa pasta permanente.
+3. Chrome: `chrome://extensions` → **Modo do desenvolvedor** → **Carregar sem compactação** → selecionar a pasta.
+4. Para atualizar: rode `atualizar.bat` e clique em **Recarregar** na página de extensões.
 
 ---
 
-## Configuração inicial
+## Interface
 
-Na **aba Ferramentas**, salve o token antes de usar a extensão:
+A extensão aparece de duas formas:
 
-| Token | Para que serve |
-|-------|----------------|
-| **Token GitHub** | Upload de ícones durante a revisão |
+- **Painel injetado na página do curso** — aparece à direita em qualquer URL `cursos.alura.com.br/*`. É arrastável, colapsável (`–`) e fechável (`×`).
+- **Popup da extensão** — clicar no ícone fora do Alura abre o popup normal. Em páginas Alura, clicar no ícone **alterna a visibilidade do painel injetado** (mostra/esconde).
 
-O token fica salvo localmente no navegador e persiste entre sessões. Nunca fica exposto no código-fonte.
-
----
-
-## Aba Revisão
-
-### Ordem das atividades
-
-Exibe o checklist da ordem esperada de atividades conforme a plataforma do curso. Selecione a plataforma no dropdown e marque cada item conforme for verificando:
-
-| Plataforma |
-|------------|
-| StartLab |
-| VS Code |
-| Figma / p5.js / Python / IA / Cultura digital / Educação Midiática |
-| Robótica |
-| Curso técnico |
+Ambos compartilham o mesmo código e o mesmo estado em `chrome.storage.local`.
 
 ---
 
-### Start revisão
+## Configuração inicial (aba Ferramentas)
 
-Executa auditoria completa do curso. **Deve ser iniciado na Home do curso.**
+Antes de usar publicação ou ícones, configure:
 
-Selecione o tipo de produto antes de iniciar:
+### Token GitHub
+- Gerar em `github.com/settings/tokens` com escopo `public_repo` (ou `repo`).
+- Usado para: **upload do ícone Start** no repo `caelum/gnarus-api-assets` (branch `master`).
+- Armazenado em `chrome.storage.local.aluraRevisorGithubToken`.
 
-| Tipo | Descrição |
-|------|-----------|
-| Curso Técnico | Regras específicas de quantidade de atividades por aula |
-| EFAI | Ensino Fundamental — Anos Iniciais |
-| EFAF | Ensino Fundamental — Anos Finais |
-| EM | Ensino Médio |
+### Credenciais R2 (Cloudflare)
+- Access Key ID + Secret Access Key geradas no painel R2 do Cloudflare.
+- Permissões: **Read & Write** no bucket `gnarus-content`.
+- Usado para: **upload de imagens** e **upload de material editorial**.
+- Armazenado em `chrome.storage.local.r2AccessKey` / `r2SecretKey`.
 
-**O que verifica:**
-- Categorias certas
-- Fórum bloqueado 
-- Tema correto (START_EM ou START_EFAI)
-- Acessa todas as aulas, ve se tem legenda nos videos (ao fim ele tem o botão para copiar todos os videos que faltam legendas)
-- Corrige a ordem das atividades
-- Exercicios com ou sem Luri.
+Os endpoints R2 e o nome do bucket são internos da extensão — não precisam ser configurados manualmente.
+
+---
+
+## Aba Revisão — "Start revisão"
+
+**O que faz:** navega automaticamente pelo curso clicando "Próxima Aula/Etapa", valida a ordem esperada das atividades contra um checklist por plataforma e reporta transcrição %, número de cliques e se chegou ao fim.
+
+**Onde usar:** **Home do curso** (`/course/{slug}`).
+
+**Antes de clicar em Start:**
+1. Selecione o **tipo de produto**: Técnico / EFAF / EM / EFAI.
+2. Selecione a **plataforma**: StartLab, VS Code, Figma / p5.js / Python / IA / Cultura digital / Educação Midiática, Robótica, Técnico.
+3. Marque o checklist conforme as atividades do curso.
+
+**Resultado:** notificação do sistema + entrada no histórico (máx. 5 últimas, em `aluraRevisorHistory`).
+
+Erro possível: `Atenção: Primeira atividade do curso está inativa` — significa que a primeira task está desativada; acerte a ordem no admin.
 
 ---
 
 ## Aba Ferramentas
 
-### Token GitHub
-
-Salva o Personal Access Token (PAT) necessário para upload de ícones.
-
-1. Cole o token no campo
-2. Clique em **Salvar token**
-
----
-
 ### Auditoria de transcrições e legendagens
 
-Audita múltiplos cursos de uma vez.
+**Entrada:** lista de IDs de curso separados por vírgula, espaço ou quebra de linha. Ex:
+```
+1678, 2262, 2667, 4319
+```
 
-1. Cole os IDs dos cursos separados por vírgula ou espaço
-2. Selecione o que verificar:
-   - **Transcrição** — vídeo com mais de 50 caracteres
-   - **Legendas em PT** — legenda em Português disponível no player
-   - **Legendas em ESP** — legenda em Espanhol disponível no player
-   - **Download textual** — baixa o conteúdo completo dos cursos em Markdown
-3. Clique em **Auditar lista**
+**Opções (checkboxes):**
+- Transcrição (verifica se está 100%)
+- Legendas em PT
+- Legendas em ESP
+- Download textual
 
-**Relatório gerado:**
+**Onde usar:** qualquer aba em `cursos.alura.com.br` (usa a sessão logada).
 
-- **Resumo** — visão consolidada por curso (cursos com pendências vs. cursos 100% corretos)
-- **Detalhado** — lista de cada vídeo com pendência e status por check (`✅`/`❌`)
-
-Opções de exportação: **Copiar** e **Baixar .txt**.
-
-A auditoria fica salva no histórico com data e hora.
-
----
-
-#### Download textual de cursos
-
-Disponível como checkbox na auditoria em lote. Quando ativado, baixa o conteúdo estruturado de cada curso em Markdown ao finalizar a auditoria.
-
-O que é extraído por curso:
-
-- Nome, traduções (EN/ES), carga horária, meta description, público-alvo, autores e ementa
-- Todas as seções e atividades com seus tipos
-- Transcrições dos vídeos
-- Alternativas corretas de exercícios com justificativas
-
-Formatos gerados: um arquivo por curso (`{id}-{slug}.md`) e um arquivo consolidado com todos os cursos.
-
----
+**Resultado:** relatório por curso no histórico, clicável.
 
 ### Upload ícone Start
 
-Faz o upload do ícone padrão Start para o curso atual.
+**Pré-requisito:** Token GitHub salvo + estar na **Home do curso** (`/course/{slug}`).
 
-**Deve ser iniciado na Home do curso** em `cursos.alura.com.br`.
+**O que faz:** detecta a categoria do curso pelo breadcrumb, lê o SVG correspondente de `icons/{categoria}.svg` (incluso na extensão) e faz `PUT` via API do GitHub em:
 
----
+```
+caelum/gnarus-api-assets  →  alura/assets/api/cursos/{courseSlug}.svg  (branch: master)
+```
+
+Categorias suportadas: `programacao`, `front-end`, `data-science`, `inteligencia-artificial`, `devops`, `design-ux`, `mobile`, `inovacao-gestao`.
 
 ### Desativar atividades em lote
 
-Busca e desativa múltiplas atividades de um curso sem precisar entrar em cada uma manualmente.
+**Entrada:** ID numérico do curso (ex: `5285`).
 
-1. Informe o **ID do curso**
-2. Clique em **Buscar atividades**
-3. Selecione as atividades a desativar (o ↗ ao lado de cada uma abre a atividade no admin em segundo plano sem fechar o popup)
-4. Clique em **Desativar selecionadas**
+**Fluxo:**
+1. Busca `GET /admin/courses/v2/{courseId}/sections` e lista atividades por seção.
+2. Você marca as que quer desativar (ou "Selecionar tudo").
+3. A extensão abre tabs admin uma a uma e aplica a desativação.
 
-Atividades já inativas aparecem riscadas e não podem ser selecionadas. O botão **Selecionar tudo** marca todas as ativas de uma vez.
-
-A lista buscada é preservada automaticamente: se o popup fechar (ao clicar no ↗, por exemplo), ao reabrir a lista reaparece sem precisar buscar novamente. A lista é limpa após a conclusão da desativação.
+**Pré-requisito:** estar logado em `cursos.alura.com.br` com permissão de admin no curso.
 
 ---
 
 ## Aba Publicação
 
+Todas as publicações desta aba escrevem direto na interface admin do curso — precisa estar logado com acesso de admin e com uma aba Alura aberta.
+
+### Imagens
+
+**Entrada:** pasta com nome no padrão `[{courseId}] imagens`, ex: `[4761] imagens/`.
+
+**Formatos aceitos:** `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.svg`, `.bmp`, `.avif`.
+
+Após upload, cada arquivo fica com botão de copiar URL pública (CDN).
+
 ### Desafio
 
-Publica o conteúdo da atividade "Para saber mais : Hora do desafio!" em cada aula de um curso, a partir de um arquivo `.txt` ou `.docx`.
+**Entrada:** `.txt` ou `.docx` com nome `[{courseId}] Desafio.xxx`.
 
-**Formato esperado do arquivo:**
-
+**Formato esperado:**
 ```
 Aula 1
 Nome da aula
 
-Para saber mais : Hora do desafio!
-[conteúdo da atividade]
+Para saber mais
+[markdown do desafio, pode conter ![](imagens/foo.png)]
 
 Sugestão de solução
-...
+[markdown da solução]
 
 Aula 2
 ...
 ```
 
-O nome do arquivo deve conter o ID do curso entre colchetes: ex. `Desafio [5275].txt`.
+A extensão substitui automaticamente as referências de imagem pelas URLs públicas do CDN — por isso publique **imagens antes do desafio**.
 
-**Como usar:**
+**Onde publica:** atividade "Hora do desafio" de cada aula correspondente.
 
-1. Arraste ou selecione o arquivo `.txt` ou `.docx`
-2. A extensão detecta o ID do curso e lista as aulas encontradas
-3. Publique aula por aula ou clique em **Publicar todas as aulas**
+### Atividades ("Faça como eu fiz")
 
-Suporte a `.docx` nativo (sem dependências externas): o parser lê o `word/document.xml` diretamente, preservando listas numeradas e formatação em Markdown.
+**Entrada:** `.txt` ou `.docx` nomeado `[{courseId}] Atividades.xxx`.
+
+**Marcadores reconhecidos (case-sensitive, no início da linha):**
+- `Aula N – Nome`
+- `PREPARANDO O AMBIENTE` → seção "Preparando o ambiente"
+- `FAÇA COMO EU FIZ` → conteúdo principal
+- `Opinião` → anexa à última seção "Faça como eu fiz"
+- `PARA SABER MAIS` → seção de links/referências
+- `Glossário`
+- `COMPARTILHE SEU PROJETO` → ignorado
+
+### Avaliação
+
+**Pré-passo:** dentro do admin do curso, abrir a aula onde a avaliação vai ficar e clicar **"Criar estrutura (10Q × 4A)"** ou **"Criar estrutura (10Q × 5A)"** — isso cria 10 blocos vazios de questão com 4 ou 5 alternativas.
+
+**Onde usar:** página admin de avaliação da aula (`/admin/course/v2/{courseId}/lesson/{lessonNum}/evaluation`).
+
+**Entrada:** `.docx` (ou `.md`/`.txt`) com padrão:
+
+```
+Título da Avaliação
+
+QUESTÃO 1
+Enunciado em múltiplas linhas...
+
+A) Primeira alternativa
+B) Segunda alternativa
+C) Terceira alternativa
+D) Quarta alternativa
+E) Quinta (opcional, só 5A)
+
+GABARITO
+C
+
+FEEDBACK PARA CORRETA
+Você acertou porque...
+
+FEEDBACK PARA INCORRETA
+Você errou porque...
+
+QUESTÃO 2
+...
+```
+
+**Descrição padrão da avaliação:** texto fixo (hardcoded como `AVAL_DESCRIPTION_MD` em `popup.js`), preenchido automaticamente.
+
+### Exercícios
+
+**Entrada:** `.docx` nomeado `[{courseId}] Exercícios.docx`.
+
+**Formato:**
+```
+EXERCÍCIO 1
+AULA 2
+
+Enunciado...
+
+A) ...
+B) ...
+C) ...
+D) ...
+E) ...
+
+GABARITO
+C
+
+FEEDBACK PARA CORRETA
+...
+
+FEEDBACK PARA INCORRETA
+...
+
+OPINIÃO DA QUESTÃO
+...
+```
+
+O agrupamento é por `AULA N`; cada bloco `EXERCÍCIO` vira uma questão da aula correspondente. Também aceita formato inline (`A) texto. B) texto. C) texto.`) que é dividido automaticamente.
 
 ---
 
-### Faça como eu fiz
+## Aba Material editorial (R2)
 
-Publica atividades de múltiplos tipos em cada aula a partir de um arquivo `.txt` ou `.docx`.
+**Pré-requisito:** credenciais R2 configuradas.
 
-**Tipos de atividade reconhecidos no documento:**
+### Nome da pasta do curso
+Digite no campo exatamente como está no Cyberduck, dentro de `Material-de-apoio-Start-2026/`. Exemplo:
+```
+5504-Educacao-midiatica-aprendendo-interagir-midias-digitais-parte-1
+```
 
-| Marcador no arquivo | Tipo de atividade |
-|---------------------|-------------------|
-| `PREPARANDO O AMBIENTE` | Preparando o ambiente |
-| `FAÇA COMO EU FIZ` | Faça como eu fiz |
-| `Opinião` | Opinião (anexada à atividade anterior) |
-| `PARA SABER MAIS` | Para saber mais |
-| `Glossário` | Glossário |
+Regra de normalização aplicada automaticamente:
+- Remove acentos (`ã→a`, `ç→c`).
+- O ID (primeiros dígitos antes do primeiro `-` ou dentro de `[...]`) é preservado.
+- O resto vira kebab-case lowercase.
 
-**Como usar:**
+### Estrutura de pasta esperada
 
-1. Arraste ou selecione o arquivo `.txt` ou `.docx`
-2. A extensão lista as aulas e atividades encontradas
-3. Publique aula por aula ou clique em **Publicar todas as aulas**
+```
+5504-educacao-midiatica-.../
+├─ Slides/
+│  ├─ AULA 01 - Educacao Midiatica.pdf
+│  └─ AULA 02 - Midia Interativa.pdf
+├─ Exercicios/
+│  ├─ AULA 01 - Lista de exercicios.pdf
+│  └─ AULA 02 - Gabarito do professor.pdf
+└─ Desafios/
+   └─ AULA 01 - Desafio comentado.pdf
+```
+
+**Arquivos:** apenas `.pdf`.
+
+**Padrão de nome:** começa com `AULA NN -` (NN = 1 a 99, zero-padding opcional). O número determina em qual aula o material é anexado.
+
+### Classificação por subpasta
+
+| Subpasta | Título no admin | Papel (userAccessRole) |
+|---|---|---|
+| `Slides/` | Slides - Estudantes | `ALL_USERS` |
+| `Exercicios/` (nome contém "gabarito") | Gabarito do professor | `TEACHER` |
+| `Exercicios/` (demais) | Lista de exercícios | `ALL_USERS` |
+| `Desafios/` | Desafio comentado - Professor | `TEACHER` |
+
+### Fluxo
+
+1. **Selecione a pasta** (botão aceita `webkitdirectory`).
+2. **Fazer upload de todos** → envia os PDFs para o storage e gera as URLs públicas (CDN) automaticamente.
+3. **Publicar nas aulas (curso {id})** → para cada aula (número extraído de `AULA NN -`):
+   - Busca `GET /admin/courses/v2/{courseId}/sections` e encontra o `sectionId` da aula.
+   - Abre a tab admin da seção.
+   - Para cada material da aula, clica `#addNewSupportMaterial`, preenche `title`, `link` (URL CDN) e `userAccessRole`, e salva.
+
+O ID do curso para a publicação é inferido do nome da pasta (prefixo numérico).
 
 ---
 
-## Arquitetura
+## Referências
 
-```
-extensao-revisao/
-├── manifest.json       # Configuração da extensão (MV3)
-├── background.js       # Service worker — operações em abas e requisições externas
-├── content.js          # Script injetado na Alura — orquestra os fluxos
-├── popup.html          # Interface da extensão
-├── popup.js            # Lógica da interface
-└── icons/              # Ícones SVG por categoria de curso
-```
-
-**Fluxo de comunicação:**
-
-```
-popup.js
-  └─► chrome.tabs.sendMessage ──► content.js
-                                      └─► chrome.runtime.sendMessage ──► background.js
-                                                                              └─► abre abas ocultas
-                                                                              └─► executa scripts
-                                                                              └─► retorna dados
-```
-
-Operações que exigem acesso ao admin são feitas pelo `background.js`, que abre abas em segundo plano, extrai os dados via `executeScript` e fecha as abas automaticamente.
-
-O estado de execução é persistido em `chrome.storage.local`. Se a aba do curso for fechada durante um fluxo, a extensão retoma de onde parou ao reabrir a página.
-
-A assinatura das requisições ao Amazon Bedrock usa **AWS SigV4** implementada diretamente no `background.js` via `crypto.subtle`, sem dependências externas.
+| O que | URL / valor |
+|---|---|
+| Origem Alura | `https://cursos.alura.com.br` |
+| Repo ícones | `caelum/gnarus-api-assets` (branch `master`) |
+| Caminho ícone | `alura/assets/api/cursos/{slug}.svg` |
+| Atualizador | `atualizar.bat` puxa `main` do repositório no GitHub |
 
 ---
 
-## Permissões
+## Storage (chaves usadas)
 
-| Permissão | Uso |
-|-----------|-----|
-| `scripting` | Executa scripts em abas do admin |
-| `storage` | Salva estado de execução, histórico e tokens |
-| `notifications` | Notifica ao finalizar auditorias |
-| `downloads` | Baixa relatórios e arquivos de conteúdo |
-| `activeTab` | Acessa a aba ativa ao iniciar operações |
-| `https://*/*` | Acessa admin, video-uploader, CDN da Alura e GitHub API |
+```text
+aluraRevisorGithubToken        token GitHub
+r2AccessKey / r2SecretKey      credenciais R2
+aluraRevisorRunState           estado da execução atual de "Start revisão"
+aluraRevisorHistory            últimas 5 execuções/auditorias
+aluraRevisorPanelCollapsed     painel injetado colapsado?
+aluraRevisorPanelHidden        painel injetado fechado?
+editorialFolderName            última pasta de material editorial usada
+imgStems_{courseId}            cache dos nomes de imagem já publicadas
+```
+
+---
+
+## Problemas comuns
+
+- **Ícone no navegador não abre/fecha o painel:** certifique-se de estar em `cursos.alura.com.br`. Fora do Alura, o ícone abre o popup tradicional.
+- **Upload de imagem/editorial falha com 403:** credenciais R2 inválidas ou sem permissão de write no storage.
+- **Upload de ícone falha com 401:** Token GitHub sem escopo suficiente ou expirado.
+- **"Primeira atividade inativa":** a primeira task do curso está desativada — abra o admin e ajuste a ordem antes de rodar a revisão.
+- **Substituição de imagens não funciona no desafio:** publique a pasta `[courseId] imagens` **antes** de publicar o desafio — o substituidor de URL usa o nome do arquivo como chave.
+- **Publicar material editorial erra a aula:** verifique se todos os PDFs começam com `AULA NN - ` (com o traço).
