@@ -1645,6 +1645,9 @@ const FEZ_SECTION_MARKERS = [
 
 function parseFezDoc(text) {
   text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+  // Desembrulha linhas 100% em negrito (ex.: "**Aula 1 – ...**", "**PREPARANDO O AMBIENTE**")
+  // para que os regex de cabeçalho/marcador casem no início da linha.
+  text = text.replace(/^\*\*(.+?)\*\*\s*$/gm, "$1");
   const lessons = [];
 
   // Divide no início de cada linha "Aula N"
