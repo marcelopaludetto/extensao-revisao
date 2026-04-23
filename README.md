@@ -243,13 +243,13 @@ Regra de normalização aplicada automaticamente:
 ```
 5504-educacao-midiatica-.../
 ├─ Slides/
-│  ├─ AULA 01 - Educacao Midiatica.pdf
-│  └─ AULA 02 - Midia Interativa.pdf
+│  ├─ FINAL_SLIDES_5504_1SERIE_AULA02_PROF
+│  └─ FINAL_SLIDES_5504_1SERIE_AULA02_ALUNO
 ├─ Exercicios/
-│  ├─ AULA 01 - Lista de exercicios.pdf
-│  └─ AULA 02 - Gabarito do professor.pdf
+│  ├─ FINAL_EXERCICIOS_5275_1SERIE_AULA01_ALUNO
+│  └─ FINAL_EXERCICIOS_5275_1SERIE_AULA01_PROF
 └─ Desafios/
-   └─ AULA 01 - Desafio comentado.pdf
+   └─ FINAL_DESAFIOS_5275_1SERIE_AULA1
 ```
 
 **Arquivos:** apenas `.pdf`.
