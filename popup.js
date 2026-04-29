@@ -963,6 +963,18 @@ async function uploadEditorialItem(idx) {
   renderEditorialCards();
   try {
     const key = buildObjectKey(folder, item.subfolder, item.name);
+
+    // Verifica se já existe no R2 antes de subir
+    const { url: headUrl, headers: headHeaders } = await signR2Request({
+      method: "HEAD", key, body: new ArrayBuffer(0), accessKey: r2AccessKey, secretKey: r2SecretKey,
+    });
+    const headRes = await fetch(headUrl, { method: "HEAD", headers: headHeaders });
+    if (headRes.ok) {
+      item.status = "exists";
+      renderEditorialCards();
+      return;
+    }
+
     await uploadToR2(item.file, key, r2AccessKey, r2SecretKey);
     item.status = "done";
   } catch (e) {
@@ -1004,9 +1016,10 @@ function renderEditorialCards() {
     upBtn.className = "edit-card-copy";
     upBtn.style.background = "#F79722";
     upBtn.style.color = "#0d1117";
-    if (item.status === "uploading") { upBtn.textContent = "…"; upBtn.disabled = true; }
-    else if (item.status === "done") { upBtn.textContent = "✓ OK"; upBtn.style.background = "#56A145"; upBtn.style.color = "#fff"; }
-    else if (item.status === "error") { upBtn.textContent = "Tentar"; upBtn.style.background = "#CA3328"; upBtn.style.color = "#fff"; }
+    if (item.status === "uploading")    { upBtn.textContent = "…";          upBtn.disabled = true; }
+    else if (item.status === "exists") { upBtn.textContent = "✓ Já no R2"; upBtn.style.background = "#3D6CE2"; upBtn.style.color = "#fff"; upBtn.disabled = true; }
+    else if (item.status === "done")   { upBtn.textContent = "✓ Enviado";  upBtn.style.background = "#56A145"; upBtn.style.color = "#fff"; }
+    else if (item.status === "error")  { upBtn.textContent = "Tentar";     upBtn.style.background = "#CA3328"; upBtn.style.color = "#fff"; }
     else upBtn.textContent = "Upload";
     upBtn.addEventListener("click", () => uploadEditorialItem(idx));
     row.appendChild(upBtn);
@@ -1279,13 +1292,24 @@ if (editUploadAllBtn) {
     }
     editUploadAllBtn.disabled = true;
     let done = 0, fail = 0;
-    for (let i = 0; i < editorialFiles.length; i++) {
-      if (editorialFiles[i].status === "done") { done++; continue; }
-      editGlobalStatus.textContent = `Enviando ${i + 1}/${editorialFiles.length}…`;
-      await uploadEditorialItem(i);
-      if (editorialFiles[i].status === "done") done++;
-      else if (editorialFiles[i].status === "error") fail++;
-    }
+    const CONCURRENCY = 4;
+    const pending = editorialFiles.map((f, i) => i).filter(i => editorialFiles[i].status !== "done" && editorialFiles[i].status !== "exists");
+    const total = editorialFiles.length;
+    editGlobalStatus.textContent = `Enviando 0/${pending.length}…`;
+
+    const queue = [...pending];
+    const worker = async () => {
+      while (queue.length > 0) {
+        const i = queue.shift();
+        await uploadEditorialItem(i);
+        if (editorialFiles[i].status === "done") done++;
+        else fail++;
+        editGlobalStatus.textContent = `Enviando ${done + fail}/${pending.length}…`;
+        renderEditorialCards();
+      }
+    };
+
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
     editUploadAllBtn.disabled = false;
     editGlobalStatus.textContent = `Concluído: ${done} ok, ${fail} com erro.`;
   });
@@ -1344,6 +1368,36 @@ function addEditorialFiles(fileList) {
     }
   }
   renderEditorialCards();
+  checkExistingR2Files();
+}
+
+async function checkExistingR2Files() {
+  const folder = editFolderInput.value.trim();
+  if (!folder) return;
+  const { r2AccessKey, r2SecretKey } = await chrome.storage.local.get(["r2AccessKey", "r2SecretKey"]);
+  if (!r2AccessKey || !r2SecretKey) return;
+
+  const CONCURRENCY = 4;
+  const toCheck = editorialFiles.filter(f => f.status === "idle");
+  const queue = [...toCheck];
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (item.status !== "idle") continue;
+      try {
+        const key = buildObjectKey(folder, item.subfolder, item.name);
+        const { url, headers } = await signR2Request({
+          method: "HEAD", key, body: new ArrayBuffer(0), accessKey: r2AccessKey, secretKey: r2SecretKey,
+        });
+        const res = await fetch(url, { method: "HEAD", headers });
+        if (res.ok) item.status = "exists";
+      } catch (_) {}
+      renderEditorialCards();
+    }
+  };
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 }
 
 editFileInput.addEventListener("change", e => {
