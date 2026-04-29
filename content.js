@@ -3307,10 +3307,9 @@
           const skillDebug = { code: null, eixo: null, activated: false, groupSet: false, skillSet: false, attrSet: false, attrScore: null, saved: false };
           if (q.habilidade?.code) {
             const code = q.habilidade.code.toUpperCase();
-            // Prefere "Competência N" do doc se presente; fallback no mapa estático
-            const eixo = q.habilidade.competencia
-              ? `C${q.habilidade.competencia}`
-              : SKILL_GROUP_MAP[code];
+            // Prefere o eixo capturado do doc (ex: "Pensamento Computacional" → PC,
+            // "Competência 3" → C3); fallback no mapa estático.
+            const eixo = q.habilidade.eixo || SKILL_GROUP_MAP[code];
             skillDebug.code = code;
             skillDebug.eixo = eixo || null;
             if (eixo) {

@@ -2545,6 +2545,29 @@ const AVAL_DESCRIPTION_HTML =
 `<p>Quaisquer dúvidas sobre as questões e alternativas pode contar com seu professor ou professora para lhe apoiar.</p>` +
 `<p>Boa avaliação!</p>`;
 
+// Mapeia prefixo textual do eixo (como aparece no doc) → código usado no select da página
+const EIXO_NAME_TO_CODE = {
+  "pensamento computacional": "PC",
+  "cultura digital": "CD",
+  "mundo digital": "MD",
+  "tecnologias digitais no trabalho docente": "TD",
+  "tecnologias digitais em situacoes de aprendizagem": "TD2",
+  "uso responsavel de tecnologias digitais no contexto educacional": "TD3",
+};
+
+function resolveEixoFromPrefix(prefix) {
+  // "Competência 3" → "C3"
+  const compMatch = prefix.match(/^Compet[eê]ncia\s+(\d+)$/i);
+  if (compMatch) return `C${compMatch[1]}`;
+  // Nome textual do eixo (PC/CD/MD/TD/TD2/TD3) — normaliza pra lookup
+  const norm = prefix
+    .toLowerCase()
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  return EIXO_NAME_TO_CODE[norm] || null;
+}
+
 // ---------- Avaliação: parsing do documento ----------
 function parseAvalDoc(text) {
   const lines = text.split("\n").map(l => l.trimEnd());
@@ -2599,17 +2622,23 @@ function parseAvalDoc(text) {
       continue;
     }
 
-    // Linha de habilidade — dois formatos suportados:
+    // Linha de habilidade — formatos aceitos (prefixo opcional antes do código):
     //   "(EF06CO05) | Descritor"
     //   "Competência 3 | (EM13CO09) | Descritor"
-    const habMatch = line.match(/^(?:Compet[eê]ncia\s+(\d+)\s*\|\s*)?\(([A-Z]{2}\d+[A-Z0-9]*)\)\s*\|?\s*(.*)/i);
+    //   "Pensamento Computacional | (EF09CO02) | Descritor"
+    //   "Cultura Digital | (...) | ..." / "Mundo Digital" / "Tecnologias digitais..." etc.
+    const habMatch = line.match(/^(?:(.+?)\s*\|\s*)?\(([A-Z]{2}\d+[A-Z0-9]*)\)\s*\|?\s*(.*)/i);
     if (habMatch) {
       if (current) {
         current.habilidade = {
           code: habMatch[2].toUpperCase(),
           descriptor: habMatch[3].trim(),
         };
-        if (habMatch[1]) current.habilidade.competencia = parseInt(habMatch[1], 10);
+        const prefix = (habMatch[1] || "").trim();
+        if (prefix) {
+          const eixo = resolveEixoFromPrefix(prefix);
+          if (eixo) current.habilidade.eixo = eixo;
+        }
       }
       continue;
     }
@@ -2764,13 +2793,13 @@ function renderAvalCards(parsed) {
     if (q.habilidade) {
       const hab = document.createElement("div");
       hab.className = "aval-habilidade";
-      if (q.habilidade.competencia) {
-        const compSpan = document.createElement("span");
-        compSpan.className = "aval-habilidade-code";
-        compSpan.style.background = "#fef3e8";
-        compSpan.style.color = "#b8580a";
-        compSpan.textContent = `C${q.habilidade.competencia}`;
-        hab.appendChild(compSpan);
+      if (q.habilidade.eixo) {
+        const eixoSpan = document.createElement("span");
+        eixoSpan.className = "aval-habilidade-code";
+        eixoSpan.style.background = "#fef3e8";
+        eixoSpan.style.color = "#b8580a";
+        eixoSpan.textContent = q.habilidade.eixo;
+        hab.appendChild(eixoSpan);
       }
       const codeSpan = document.createElement("span");
       codeSpan.className = "aval-habilidade-code";
