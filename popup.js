@@ -842,9 +842,23 @@ const editDropArea = document.getElementById("edit-drop-area");
 const editFilesEl = document.getElementById("edit-files");
 const editUploadAllBtn = document.getElementById("edit-upload-all-btn");
 const editPublishBtn = document.getElementById("edit-publish-btn");
+const editResetBtn = document.getElementById("edit-reset-btn");
 const editCourseIdLabel = document.getElementById("edit-course-id-label");
 const editGlobalStatus = document.getElementById("edit-global-status");
 const editPublishLog = document.getElementById("edit-publish-log");
+
+if (editResetBtn) {
+  editResetBtn.addEventListener("click", () => {
+    editorialFiles = [];
+    editFolderInput.value = "";
+    chrome.storage.local.remove(EDIT_FOLDER_KEY);
+    editCourseIdLabel.textContent = "-";
+    if (editFileInput) editFileInput.value = "";
+    editGlobalStatus.textContent = "";
+    editPublishLog.textContent = "";
+    renderEditorialCards();
+  });
+}
 
 function extractCourseId(folder) {
   const m = (folder || "").match(/^\s*\[?\s*(\d+)/);
@@ -870,6 +884,7 @@ editFolderInput.addEventListener("blur", () => {
   if (normalized && normalized !== v) {
     editFolderInput.value = normalized;
     chrome.storage.local.set({ [EDIT_FOLDER_KEY]: normalized });
+    editCourseIdLabel.textContent = extractCourseId(normalized) || "-";
     renderEditorialCards();
   }
 });
@@ -898,15 +913,18 @@ function detectSubfolder(name, relPath) {
     const parts = relPath.split("/").slice(0, -1); // remove o arquivo
     for (const p of parts) {
       const up = p.toUpperCase();
-      if (up.startsWith("SLIDE")) return "Slides";
-      if (up.startsWith("EXERCICIO") || up.startsWith("EXERCÍCIO")) return "Exercicios";
-      if (up.startsWith("DESAFIO")) return "Desafios";
+      // Produto novo: pastas locais "1 - Plano de aula" / "2 - Slide"
+      if (up.includes("PLANO")) return "plano-de-aula";
+      if (up.includes("EXERCICIO") || up.includes("EXERCÍCIO")) return "Exercicios";
+      if (up.includes("DESAFIO")) return "Desafios";
+      if (up.includes("SLIDE")) return "Slides";
     }
   }
   const up = name.toUpperCase();
-  if (up.includes("SLIDE")) return "Slides";
+  if (up.startsWith("PLANO-DE-AULA")) return "plano-de-aula";
   if (up.includes("EXERCICIO") || up.includes("EXERCÍCIO")) return "Exercicios";
   if (up.includes("DESAFIO")) return "Desafios";
+  if (up.includes("SLIDE")) return "Slides";
   return "Slides";
 }
 
@@ -1071,6 +1089,10 @@ function classifyMaterial(name) {
   const up = name.toUpperCase();
   const isProf = /PROF/.test(up);
   const isAluno = /ALUNO/.test(up);
+  // Produto novo: "plano-de-aula-NN-..." e "slide-NN-..." (sem PROF/ALUNO)
+  if (/^PLANO-DE-AULA-/.test(up)) return { title: "Plano de aula", role: "TEACHER" };
+  if (/^SLIDES?-\d/.test(up) && !isProf && !isAluno) return { title: "Slides", role: "TEACHER" };
+  // Produto antigo
   if (up.includes("SLIDE") && isProf) return { title: "Guia do professor", role: "TEACHER" };
   if (up.includes("SLIDE") && isAluno) return { title: "Slides - Estudantes", role: "ALL_USERS" };
   if ((up.includes("EXERCICIO") || up.includes("EXERCÍCIO")) && isProf) return { title: "Gabarito do professor", role: "TEACHER" };
@@ -1249,33 +1271,45 @@ if (editPublishBtn) {
     }));
 
     let okCount = 0, failCount = 0, skipCount = 0;
-    for (const aulaStr of Object.keys(byAula).sort((a, b) => +a - +b)) {
-      const aula = parseInt(aulaStr, 10);
-      const sectionId = sectionsMap[aula];
-      const mats = byAula[aula];
-      if (!sectionId) { logPublish(`Aula ${aula}: section não encontrada — pulado (${mats.length} materiais).`); failCount++; continue; }
+    const aulasOrdenadas = Object.keys(byAula).sort((a, b) => +a - +b).map(s => parseInt(s, 10));
+    const queue = [...aulasOrdenadas];
 
-      const existingTitles = existingBySection[sectionId] || new Set();
-      const novos = mats.filter(m => !existingTitles.has(m.title.trim().toLowerCase()));
-      const duplicados = mats.filter(m => existingTitles.has(m.title.trim().toLowerCase()));
+    const CONCURRENCY = 4;
+    const worker = async () => {
+      while (queue.length > 0) {
+        const aula = queue.shift();
+        const sectionId = sectionsMap[aula];
+        const mats = byAula[aula];
+        if (!sectionId) {
+          logPublish(`Aula ${aula}: section não encontrada — pulado (${mats.length} materiais).`);
+          failCount++;
+          continue;
+        }
 
-      duplicados.forEach(m => {
-        logPublish(`Aula ${aula}: pulado (já existe) — ${m.title}`);
-        skipCount++;
-      });
+        const existingTitles = existingBySection[sectionId] || new Set();
+        const novos = mats.filter(m => !existingTitles.has(m.title.trim().toLowerCase()));
+        const duplicados = mats.filter(m => existingTitles.has(m.title.trim().toLowerCase()));
 
-      if (novos.length === 0) { logPublish(`Aula ${aula}: nada novo para publicar.`); continue; }
+        duplicados.forEach(m => {
+          logPublish(`Aula ${aula}: pulado (já existe) — ${m.title}`);
+          skipCount++;
+        });
 
-      logPublish(`Aula ${aula} (section ${sectionId}): publicando ${novos.length} material(is)…`);
-      try {
-        await publishMaterialsForSection(courseId, sectionId, novos);
-        logPublish(`Aula ${aula}: OK`);
-        okCount++;
-      } catch (e) {
-        logPublish(`Aula ${aula}: ERRO — ${e.message}`);
-        failCount++;
+        if (novos.length === 0) { logPublish(`Aula ${aula}: nada novo para publicar.`); continue; }
+
+        logPublish(`Aula ${aula} (section ${sectionId}): publicando ${novos.length} material(is)…`);
+        try {
+          await publishMaterialsForSection(courseId, sectionId, novos);
+          logPublish(`Aula ${aula}: OK`);
+          okCount++;
+        } catch (e) {
+          logPublish(`Aula ${aula}: ERRO — ${e.message}`);
+          failCount++;
+        }
       }
-    }
+    };
+    await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+
     logPublish(`\nConcluído: ${okCount} aula(s) OK, ${skipCount} material(is) ignorado(s) por duplicata, ${failCount} com erro.`);
     editPublishBtn.disabled = false;
   });
@@ -1316,11 +1350,16 @@ if (editUploadAllBtn) {
 }
 
 function extractAulaNumber(name) {
-  const m = name.match(/AULA\s*0*(\d+)/i);
-  return m ? parseInt(m[1], 10) : 9999;
+  // Produto antigo: "..._AULA01_..."
+  let m = name.match(/AULA\s*0*(\d+)/i);
+  if (m) return parseInt(m[1], 10);
+  // Produto novo: "plano-de-aula-NN-..." ou "slide-NN-..."
+  m = name.match(/^(?:plano-de-aula|slides?)-0*(\d+)/i);
+  if (m) return parseInt(m[1], 10);
+  return 9999;
 }
 
-const SUBFOLDER_ORDER = { "Slides": 0, "Exercicios": 1, "Desafios": 2 };
+const SUBFOLDER_ORDER = { "Slides": 0, "plano-de-aula": 1, "Exercicios": 2, "Desafios": 3 };
 
 function sortEditorialFiles() {
   editorialFiles.sort((a, b) => {
@@ -1365,6 +1404,7 @@ function addEditorialFiles(fileList) {
     if (normalized && normalized !== editFolderInput.value.trim()) {
       editFolderInput.value = normalized;
       chrome.storage.local.set({ [EDIT_FOLDER_KEY]: normalized });
+      editCourseIdLabel.textContent = extractCourseId(normalized) || "-";
     }
   }
   renderEditorialCards();
