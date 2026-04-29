@@ -2599,8 +2599,20 @@ function parseAvalDoc(text) {
       continue;
     }
 
-    // Linha de habilidade: "(EM13CO22) ..." — ignora
-    if (/^\([A-Z]{2}\d+[A-Z0-9]*\)/i.test(line)) continue;
+    // Linha de habilidade — dois formatos suportados:
+    //   "(EF06CO05) | Descritor"
+    //   "Competência 3 | (EM13CO09) | Descritor"
+    const habMatch = line.match(/^(?:Compet[eê]ncia\s+(\d+)\s*\|\s*)?\(([A-Z]{2}\d+[A-Z0-9]*)\)\s*\|?\s*(.*)/i);
+    if (habMatch) {
+      if (current) {
+        current.habilidade = {
+          code: habMatch[2].toUpperCase(),
+          descriptor: habMatch[3].trim(),
+        };
+        if (habMatch[1]) current.habilidade.competencia = parseInt(habMatch[1], 10);
+      }
+      continue;
+    }
 
     // Início de alternativa com letra: a) b) c) d) e)
     const altMatch = line.match(/^([a-eA-E])\)\s*(.*)/);
@@ -2748,6 +2760,31 @@ function renderAvalCards(parsed) {
 
     card.appendChild(lbl);
     card.appendChild(qName);
+
+    if (q.habilidade) {
+      const hab = document.createElement("div");
+      hab.className = "aval-habilidade";
+      if (q.habilidade.competencia) {
+        const compSpan = document.createElement("span");
+        compSpan.className = "aval-habilidade-code";
+        compSpan.style.background = "#fef3e8";
+        compSpan.style.color = "#b8580a";
+        compSpan.textContent = `C${q.habilidade.competencia}`;
+        hab.appendChild(compSpan);
+      }
+      const codeSpan = document.createElement("span");
+      codeSpan.className = "aval-habilidade-code";
+      codeSpan.textContent = q.habilidade.code;
+      hab.appendChild(codeSpan);
+      if (q.habilidade.descriptor) {
+        const descSpan = document.createElement("span");
+        descSpan.className = "aval-habilidade-desc";
+        descSpan.textContent = q.habilidade.descriptor;
+        hab.appendChild(descSpan);
+      }
+      card.appendChild(hab);
+    }
+
     card.appendChild(qText);
 
     q.alts.forEach(a => {
@@ -2781,7 +2818,19 @@ function renderAvalCards(parsed) {
         if (ack?.ok) {
           const d = ack.debugRadio;
           const radioInfo = d ? ` | radio: idx=${d.correctIdx}/${d.totalBlocks} found=${d.radioFound} before=${d.checkedBefore} after=${d.checkedAfter}` : "";
-          status.textContent = `✅ Preenchida${radioInfo}`;
+          const sk = ack.skillDebug;
+          let skillInfo = "";
+          if (sk?.code) {
+            const attrTag = sk.attrSet ? ` +attr(${sk.attrScore}%)` : (sk.attrScore != null ? ` attr-no-match(${sk.attrScore}%)` : "");
+            if (sk.saved) skillInfo = ` | skill: ${sk.code} ✓ salvo${attrTag}`;
+            else if (sk.skillSet) skillInfo = ` | skill: ${sk.code} (selecionado, save ✗)${attrTag}`;
+            else if (sk.groupSet) skillInfo = ` | skill: ${sk.code} (eixo OK, hab ✗)`;
+            else if (sk.activated) skillInfo = ` | skill: ${sk.code} (eixo ✗)`;
+            else if (sk.eixo) skillInfo = ` | skill: ${sk.code} (bloco não ativou)`;
+            else skillInfo = ` | skill: ${sk.code} (eixo não mapeado)`;
+            if (sk.error) skillInfo += ` [err: ${sk.error}]`;
+          }
+          status.textContent = `✅ Preenchida${radioInfo}${skillInfo}`;
           btn.textContent = "Repreencher";
           btn.classList.add("done");
         } else {

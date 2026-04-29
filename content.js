@@ -11,6 +11,29 @@
   const ERROR_FIRST_TASK_INACTIVE =
     "Atenção: Primeira atividade do curso está inativa. Entre no admin e altere a ordem.";
 
+  // Mapeia código de habilidade → eixo/competência (extraído de Cadastro Skills - Matriz Start.xlsx)
+  const SKILL_GROUP_MAP = {
+    EF06CO01:"PC", EF06CO02:"PC", EF06CO03:"PC", EF06CO04:"PC", EF06CO05:"PC", EF06CO06:"PC",
+    EF06CO07:"MD", EF06CO08:"MD",
+    EF06CO09:"CD", EF06CO10:"CD",
+    EF07CO01:"PC", EF07CO02:"PC", EF07CO03:"PC", EF07CO04:"PC", EF07CO05:"PC",
+    EF07CO06:"MD", EF07CO07:"MD",
+    EF07CO08:"CD", EF07CO09:"CD", EF07CO10:"CD", EF07CO11:"CD",
+    EF08CO01:"PC", EF08CO02:"PC", EF08CO03:"PC", EF08CO04:"PC",
+    EF08CO05:"MD", EF08CO06:"MD",
+    EF08CO07:"CD", EF08CO08:"CD", EF08CO09:"CD", EF08CO10:"CD", EF08CO11:"CD",
+    EF09CO01:"PC", EF09CO02:"PC", EF09CO03:"PC",
+    EF09CO04:"MD", EF09CO05:"MD",
+    EF09CO06:"CD", EF09CO07:"CD", EF09CO08:"CD", EF09CO09:"CD", EF09CO10:"CD",
+    EM13CO01:"C1", EM13CO02:"C1", EM13CO03:"C1", EM13CO04:"C1", EM13CO05:"C1", EM13CO06:"C1",
+    EM13CO07:"C2", EM13CO08:"C2",
+    EM13CO09:"C3", EM13CO10:"C3", EM13CO11:"C3",
+    EM13CO12:"C4", EM13CO13:"C4", EM13CO14:"C4", EM13CO15:"C4", EM13CO16:"C4",
+    EM13CO17:"C5", EM13CO18:"C5",
+    EM13CO19:"C6", EM13CO20:"C6", EM13CO21:"C6", EM13CO22:"C6",
+    EM13CO23:"C7", EM13CO24:"C7", EM13CO25:"C7", EM13CO26:"C7",
+  };
+
   function normalizeText(s) {
     return (s || "").replace(/\s+/g, " ").trim();
   }
@@ -3257,7 +3280,132 @@
               });
             }
           }
-          sendResponse({ ok: true, debugRadio });
+
+          // Normaliza texto p/ matching de descritor (sem acento, sem pontuação, lower, single-space)
+          function normAttr(s) {
+            return (s || "")
+              .toLowerCase()
+              .normalize("NFD").replace(/[̀-ͯ]/g, "")
+              .replace(/[^a-z0-9\s]/g, " ")
+              .replace(/\s+/g, " ")
+              .trim();
+          }
+          function jaccardWords(a, b) {
+            const sa = new Set(a.split(" ").filter(Boolean));
+            const sb = new Set(b.split(" ").filter(Boolean));
+            if (!sa.size || !sb.size) return 0;
+            let inter = 0;
+            for (const w of sa) if (sb.has(w)) inter++;
+            const union = sa.size + sb.size - inter;
+            return inter / union;
+          }
+
+          // Habilidade avaliada: ativa o bloco e seleciona eixo + skill + descritor
+          // O .skill__container já existe no DOM mas começa vazio dentro de
+          // <div class="skill --disabled">. O clique em "Adicionar habilidade avaliada"
+          // remove --disabled E popula as options do group__select.
+          const skillDebug = { code: null, eixo: null, activated: false, groupSet: false, skillSet: false, attrSet: false, attrScore: null, saved: false };
+          if (q.habilidade?.code) {
+            const code = q.habilidade.code.toUpperCase();
+            // Prefere "Competência N" do doc se presente; fallback no mapa estático
+            const eixo = q.habilidade.competencia
+              ? `C${q.habilidade.competencia}`
+              : SKILL_GROUP_MAP[code];
+            skillDebug.code = code;
+            skillDebug.eixo = eixo || null;
+            if (eixo) {
+              try {
+                const skillBlock = wrapper.querySelector(".skill");
+                const skillContainer = wrapper.querySelector(".skill__container");
+                let groupSel = skillContainer?.querySelector(".group__select");
+                const needsActivation =
+                  !skillBlock ||
+                  skillBlock.classList.contains("--disabled") ||
+                  !groupSel ||
+                  groupSel.options.length <= 1;
+
+                if (needsActivation) {
+                  const addBtn = [...wrapper.querySelectorAll("button.add__skill__button, button")]
+                    .find(b => /Adicionar habilidade avaliada/i.test(b.textContent));
+                  if (addBtn) {
+                    addBtn.click();
+                    await waitFor(() => {
+                      const sel = wrapper.querySelector(".skill__container .group__select");
+                      return sel && sel.options.length > 1 ? sel : null;
+                    }, 5000);
+                    groupSel = wrapper.querySelector(".skill__container .group__select");
+                  }
+                }
+                skillDebug.activated = !!(groupSel && groupSel.options.length > 1);
+
+                if (skillDebug.activated) {
+                  const groupOpt = [...groupSel.options].find(o =>
+                    o.textContent.trim().startsWith(`(${eixo})`)
+                  );
+                  if (groupOpt) {
+                    groupSel.value = groupOpt.value;
+                    groupSel.dispatchEvent(new Event("change", { bubbles: true }));
+                    skillDebug.groupSet = true;
+
+                    const skillSel = await waitFor(() => {
+                      const s = wrapper.querySelector(".skill__container .skill__select");
+                      return s && !s.disabled && s.options.length > 1 ? s : null;
+                    }, 5000);
+                    const skillOpt = skillSel && [...skillSel.options].find(o =>
+                      o.textContent.trim().startsWith(`(${code})`)
+                    );
+                    if (skillSel && skillOpt) {
+                      skillSel.value = skillOpt.value;
+                      skillSel.dispatchEvent(new Event("change", { bubbles: true }));
+                      skillDebug.skillSet = true;
+
+                      // Seleciona o descritor (atributo) que melhor casa com q.habilidade.descriptor
+                      if (q.habilidade.descriptor) {
+                        const descTarget = normAttr(q.habilidade.descriptor);
+                        const attrList = await waitFor(() => {
+                          const c = wrapper.querySelector(".attribute__container");
+                          if (!c || c.classList.contains("--disabled")) return null;
+                          const list = c.querySelector(".attributes__List");
+                          return list && list.querySelectorAll('input[type="radio"]').length > 0 ? list : null;
+                        }, 5000);
+
+                        if (attrList) {
+                          const radios = [...attrList.querySelectorAll('input[type="radio"]')];
+                          let bestRadio = null, bestScore = -1;
+                          for (const radio of radios) {
+                            const container = radio.closest("label, .attribute__item, li, div") || radio.parentElement;
+                            const rawText = (container?.textContent || "").replace(/^\s*\(D\d+\)\s*/i, "").trim();
+                            const score = jaccardWords(normAttr(rawText), descTarget);
+                            if (score > bestScore) { bestScore = score; bestRadio = radio; }
+                          }
+                          skillDebug.attrScore = Math.round(bestScore * 100);
+                          if (bestRadio && bestScore >= 0.5) {
+                            bestRadio.click();
+                            await sleep(150);
+                            skillDebug.attrSet = true;
+                          }
+                        }
+                      }
+
+                      // Salva a habilidade clicando em "Adicionar habilidade"
+                      const saveBtn = await waitFor(() => {
+                        const b = wrapper.querySelector(".save__skill__button");
+                        return b && !b.disabled ? b : null;
+                      }, 3000);
+                      if (saveBtn) {
+                        saveBtn.click();
+                        skillDebug.saved = true;
+                      }
+                    }
+                  }
+                }
+              } catch (e) {
+                skillDebug.error = e.message;
+              }
+            }
+          }
+
+          sendResponse({ ok: true, debugRadio, skillDebug });
 
           sendResponse({ ok: true });
 
