@@ -2770,6 +2770,42 @@ function renderAvalCards(parsed) {
     avalSend({ type: "ALURA_REVISOR_FILL_ASSESSMENT", field: "description", markdown: AVAL_DESCRIPTION_MD, html: AVAL_DESCRIPTION_HTML })
   ));
 
+  // Botão: Preencher todas as questões (apenas questões, sem título/descrição)
+  const allWrapper = document.createElement("div");
+  allWrapper.style.cssText = "display:flex;flex-direction:column;gap:4px;padding:6px 0;";
+  const allBtn = document.createElement("button");
+  allBtn.style.cssText = "width:100%;padding:8px 12px;font-size:12px;font-weight:700;background:#9761FF;color:#fff;border:none;border-radius:6px;cursor:pointer;font-family:inherit;letter-spacing:0.3px;";
+  const total = parsed.questions.length;
+  allBtn.textContent = `▶ Preencher todas as questões (${total})`;
+  const allStatus = document.createElement("div");
+  allStatus.style.cssText = "font-size:11px;color:#444;text-align:center;min-height:14px;";
+
+  allBtn.addEventListener("click", async () => {
+    allBtn.disabled = true;
+    allBtn.style.opacity = "0.6";
+    let ok = 0, fail = 0;
+
+    for (let i = 0; i < parsed.questions.length; i++) {
+      const q = parsed.questions[i];
+      allStatus.textContent = `[${i + 1}/${total}] Questão ${q.num}…`;
+      const ack = await avalSend({
+        type: "ALURA_REVISOR_FILL_ASSESSMENT",
+        field: "question",
+        question: q,
+      }).catch(e => ({ ok: false, error: e.message }));
+      ack?.ok ? ok++ : fail++;
+    }
+
+    allStatus.textContent = `✅ ${ok} preenchida(s)${fail ? ` · ❌ ${fail} falhou` : ""}`;
+    allBtn.disabled = false;
+    allBtn.style.opacity = "1";
+    allBtn.textContent = `▶ Preencher todas novamente`;
+  });
+
+  allWrapper.appendChild(allBtn);
+  allWrapper.appendChild(allStatus);
+  container.appendChild(allWrapper);
+
   // Cards: Questões
   parsed.questions.forEach(q => {
     const card = document.createElement("div");
