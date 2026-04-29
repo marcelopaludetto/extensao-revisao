@@ -4,7 +4,7 @@
   "version": "4.0",
   "update_url": "https://hub-producao-conteudo.vercel.app/update.xml",
   "description": "Deus existe e é brasileiro, mas não é o Bolsonaro. Ele é a Start Revisão!  (Escrito por IA)",
-  "permissions": ["activeTab", "scripting", "storage", "notifications", "downloads", "identity"],
+  "permissions": ["activeTab", "scripting", "storage", "notifications", "downloads", "identity", "tabs"],
   "host_permissions": ["https://cursos.alura.com.br/*", "https://*/*"],
   "icons": {
     "16": "icon16.png",

@@ -685,6 +685,67 @@
       border-radius: 6px;
       cursor: pointer;
     }
+
+    /* Materiais publicados */
+    .mat-section-card {
+      border: 1px solid #d0d7de;
+      border-radius: 8px;
+      background: #fff;
+      overflow: hidden;
+    }
+
+    .mat-section-header {
+      background: #e6edf3;
+      padding: 6px 10px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #0d1117;
+    }
+
+    .mat-item {
+      display: flex;
+      align-items: flex-start;
+      gap: 8px;
+      padding: 6px 10px;
+      border-top: 1px solid #f0f4f8;
+      font-size: 11px;
+    }
+
+    .mat-item-info { flex: 1; min-width: 0; }
+
+    .mat-item-title {
+      font-weight: 600;
+      color: #0d1117;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .mat-item-link {
+      color: #3D6CE2;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      display: block;
+      text-decoration: none;
+      font-size: 10px;
+    }
+
+    .mat-item-link:hover { text-decoration: underline; }
+
+    .mat-item-role {
+      font-size: 9px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      flex-shrink: 0;
+      margin-top: 1px;
+    }
+
+    .mat-item-role.all { background: #dff0d8; color: #2d6a1f; }
+    .mat-item-role.teacher { background: #fef3cd; color: #856404; }
   </style>
 </head>
 
@@ -902,6 +963,11 @@
       <input type="text" id="edit-folder" placeholder="5504-Educacao-midiatica-aprendendo-interagir-midias-digitais-parte-1">
       <div class="hint" style="margin-top:-2px;margin-bottom:10px">Nome exato da pasta criada no Cyberduck dentro de <strong>Material-de-apoio-Start-2026/</strong></div>
 
+      <button id="edit-upload-all-btn" style="display:none;background:#F79722;color:#0d1117;margin-bottom:6px;">Fazer upload de todos</button>
+      <button id="edit-publish-btn" style="display:none;background:#9761FF;color:#fff;margin-bottom:6px;">Publicar nas aulas (curso <span id="edit-course-id-label">-</span>)</button>
+      <div id="edit-global-status" style="margin-bottom:4px;font-size:12px;color:#444d56;"></div>
+      <div id="edit-publish-log" style="margin-bottom:8px;font-size:11px;color:#444d56;white-space:pre-wrap;max-height:180px;overflow-y:auto;"></div>
+
       <label class="pub-drop-area" id="edit-drop-area" for="edit-file-input">
         <input type="file" id="edit-file-input" accept=".pdf" multiple webkitdirectory directory>
         <span>📁 Clique para selecionar a <strong>pasta do curso</strong> (com subpastas)</span>
@@ -909,10 +975,13 @@
 
       <div id="edit-files" style="display:flex;flex-direction:column;gap:8px;"></div>
 
-      <button id="edit-upload-all-btn" style="display:none;background:#F79722;color:#0d1117;margin-top:10px;">Fazer upload de todos</button>
-      <button id="edit-publish-btn" style="display:none;background:#9761FF;color:#fff;margin-top:6px;">Publicar nas aulas (curso <span id="edit-course-id-label">-</span>)</button>
-      <div id="edit-global-status" style="margin-top:6px;font-size:12px;color:#444d56;"></div>
-      <div id="edit-publish-log" style="margin-top:6px;font-size:11px;color:#444d56;white-space:pre-wrap;max-height:180px;overflow-y:auto;"></div>
+      <hr class="divider">
+
+      <div class="section-label" style="margin-top:0">Materiais publicados</div>
+      <input type="text" id="mat-list-course-id" placeholder="ID do curso (ex: 5504)">
+      <button id="mat-list-btn" style="background:#0d1117;color:#50DEFF;border:1.5px solid #50DEFF;">Buscar materiais</button>
+      <div id="mat-list-status" style="margin-top:6px;font-size:12px;color:#444d56;"></div>
+      <div id="mat-list-results" style="margin-top:8px;display:flex;flex-direction:column;gap:8px;"></div>
     </div>
 
   </div>

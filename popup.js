@@ -566,6 +566,238 @@ async function uploadToR2(file, objectKey, accessKey, secretKey) {
   }
 }
 
+// ---------- Materiais publicados ----------
+const matListCourseIdInput = document.getElementById("mat-list-course-id");
+const matListBtn = document.getElementById("mat-list-btn");
+const matListStatus = document.getElementById("mat-list-status");
+const matListResults = document.getElementById("mat-list-results");
+
+async function fetchSectionMaterials(courseId, sectionId) {
+  const res = await fetch(
+    `https://cursos.alura.com.br/admin/courses/v2/${courseId}/sections/${sectionId}`,
+    { credentials: "include" }
+  );
+  if (!res.ok) return [];
+  const html = await res.text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+  const materials = [];
+
+  // Materiais existentes ficam numa <table> com linhas: título | link | permissão | ações
+  doc.querySelectorAll("table.table tbody tr").forEach(tr => {
+    const tds = tr.querySelectorAll("td");
+    if (tds.length < 4) return;
+    const title = tds[0].textContent.trim();
+    const link = (tds[1].querySelector(".support-material-link")?.textContent || "").trim();
+    const permission = tds[2].textContent.trim().toLowerCase();
+    const deleteBtn = tds[3].querySelector("button.delete[data-materialid]");
+    const materialId = deleteBtn?.dataset.materialid || null;
+    const role = permission.includes("professor") ? "TEACHER" : "ALL_USERS";
+    if (title) materials.push({ title, link, role, materialId });
+  });
+
+  return materials;
+}
+
+async function listPublishedMaterials(courseId) {
+  const res = await fetch(
+    `https://cursos.alura.com.br/admin/courses/v2/${courseId}/sections`,
+    { credentials: "include" }
+  );
+  if (!res.ok) throw new Error(`Falha ao buscar seções: ${res.status}`);
+  const html = await res.text();
+  const doc = new DOMParser().parseFromString(html, "text/html");
+
+  const sections = [];
+  doc.querySelectorAll("tbody tr[id]").forEach(tr => {
+    const sectionId = tr.id;
+    const tds = tr.querySelectorAll("td");
+    if (tds.length < 2) return;
+    const n = parseInt(tds[1].textContent.trim(), 10);
+    const title = tds[0]?.textContent.trim() || "";
+    if (!isNaN(n)) sections.push({ sectionId, aulaNum: n, title });
+  });
+
+  matListStatus.textContent = `${sections.length} aula(s) encontrada(s). Buscando materiais…`;
+
+  const CONCURRENCY = 4;
+  const results = [];
+  for (let i = 0; i < sections.length; i += CONCURRENCY) {
+    const batch = sections.slice(i, i + CONCURRENCY);
+    const batchResults = await Promise.all(
+      batch.map(async sec => ({
+        ...sec,
+        materials: await fetchSectionMaterials(courseId, sec.sectionId),
+      }))
+    );
+    results.push(...batchResults);
+    matListStatus.textContent = `Processando… ${Math.min(i + CONCURRENCY, sections.length)}/${sections.length} aulas`;
+  }
+
+  return results.sort((a, b) => a.aulaNum - b.aulaNum);
+}
+
+async function deleteSupportMaterial(courseId, sectionId, materialId, itemEl) {
+  const sectionUrl = `https://cursos.alura.com.br/admin/courses/v2/${courseId}/sections/${sectionId}`;
+
+  const tab = await chrome.tabs.create({ url: sectionUrl, active: false });
+  const tabId = tab.id;
+
+  try {
+    // Aguarda a página carregar completamente
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timeout ao carregar página.")), 20000);
+      chrome.tabs.onUpdated.addListener(function listener(id, info) {
+        if (id === tabId && info.status === "complete") {
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      });
+    });
+
+    // world: "MAIN" → roda no mesmo contexto JS da página (mesmo window que o jQuery usa)
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [materialId],
+      func: (materialId) => {
+        window.confirm = () => true;
+        const btn = document.querySelector(`button.delete[data-materialid="${materialId}"]`);
+        if (btn) btn.click();
+      },
+    });
+
+    // Aguarda a página recarregar após a deleção (navegação ou reload pós-submit)
+    await new Promise((resolve) => {
+      const timer = setTimeout(resolve, 8000); // máximo 8s
+      chrome.tabs.onUpdated.addListener(function listener(id, info) {
+        if (id === tabId && info.status === "complete") {
+          clearTimeout(timer);
+          chrome.tabs.onUpdated.removeListener(listener);
+          resolve();
+        }
+      });
+    });
+
+    // Verifica se o material foi removido
+    const check = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      args: [materialId],
+      func: (materialId) => !document.querySelector(`button.delete[data-materialid="${materialId}"]`),
+    });
+
+    const deleted = check?.[0]?.result;
+    if (!deleted) throw new Error("Material ainda aparece após deleção.");
+
+    itemEl.style.opacity = "0.4";
+    itemEl.style.pointerEvents = "none";
+    itemEl.querySelector(".mat-del-btn").textContent = "Deletado";
+  } catch (e) {
+    const errEl = itemEl.querySelector(".mat-del-err");
+    if (errEl) {
+      errEl.textContent = e.message;
+      errEl.style.display = "block";
+    }
+    const delBtn = itemEl.querySelector(".mat-del-btn");
+    if (delBtn) { delBtn.disabled = false; delBtn.textContent = "Deletar"; }
+  } finally {
+    await chrome.tabs.remove(tabId).catch(() => {});
+  }
+}
+
+function renderMatResults(sections) {
+  matListResults.innerHTML = "";
+  const withMaterials = sections.filter(s => s.materials.length > 0);
+  if (withMaterials.length === 0) {
+    matListResults.innerHTML = `<div style="font-size:12px;color:#888;">Nenhum material encontrado.</div>`;
+    return;
+  }
+
+  const courseId = matListCourseIdInput.value.trim();
+
+  withMaterials.forEach(sec => {
+    const card = document.createElement("div");
+    card.className = "mat-section-card";
+
+    const header = document.createElement("div");
+    header.className = "mat-section-header";
+    header.textContent = `Aula ${sec.aulaNum}${sec.title ? " — " + sec.title : ""}`;
+    card.appendChild(header);
+
+    sec.materials.forEach(m => {
+      const item = document.createElement("div");
+      item.className = "mat-item";
+
+      const roleClass = (m.role || "").toUpperCase().includes("TEACHER") ? "teacher" : "all";
+      const roleLabel = roleClass === "teacher" ? "Professor" : "Alunos";
+
+      const info = document.createElement("div");
+      info.className = "mat-item-info";
+      info.innerHTML = `
+        <div class="mat-item-title">${m.title}</div>
+        ${m.link ? `<a class="mat-item-link" href="${m.link}" target="_blank" rel="noopener">${m.link}</a>` : ""}
+      `;
+
+      const role = document.createElement("span");
+      role.className = `mat-item-role ${roleClass}`;
+      role.textContent = roleLabel;
+
+      item.style.flexWrap = "wrap";
+      item.appendChild(info);
+      item.appendChild(role);
+
+      if (m.materialId) {
+        const delBtn = document.createElement("button");
+        delBtn.className = "mat-del-btn";
+        delBtn.textContent = "Deletar";
+        delBtn.style.cssText = `
+          width:auto;padding:2px 8px;font-size:10px;font-weight:700;
+          background:none;border:1.5px solid #CA3328;color:#CA3328;
+          border-radius:4px;cursor:pointer;flex-shrink:0;font-family:inherit;
+        `;
+
+        const errEl = document.createElement("span");
+        errEl.className = "mat-del-err";
+        errEl.style.cssText = "display:none;font-size:10px;color:#CA3328;width:100%;margin-top:2px;";
+
+        delBtn.addEventListener("click", async () => {
+          delBtn.disabled = true;
+          delBtn.textContent = "…";
+          errEl.style.display = "none";
+          await deleteSupportMaterial(courseId, sec.sectionId, m.materialId, item);
+        });
+        item.appendChild(delBtn);
+        item.appendChild(errEl);
+      }
+
+      card.appendChild(item);
+    });
+
+    matListResults.appendChild(card);
+  });
+}
+
+matListBtn.addEventListener("click", async () => {
+  const courseId = matListCourseIdInput.value.trim();
+  if (!courseId) { matListStatus.textContent = "Informe o ID do curso."; return; }
+  matListBtn.disabled = true;
+  matListResults.innerHTML = "";
+  matListStatus.style.color = "#444d56";
+  matListStatus.textContent = "Buscando seções…";
+  try {
+    const sections = await listPublishedMaterials(courseId);
+    const total = sections.reduce((a, s) => a + s.materials.length, 0);
+    matListStatus.textContent = `${total} material(is) em ${sections.filter(s => s.materials.length).length} aula(s).`;
+    renderMatResults(sections);
+  } catch (e) {
+    matListStatus.style.color = "#CA3328";
+    matListStatus.textContent = `Erro: ${e.message}`;
+  } finally {
+    matListBtn.disabled = false;
+  }
+});
+
 const EDIT_FOLDER_KEY = "editorialFolderName";
 const editFolderInput = document.getElementById("edit-folder");
 const editFileInput = document.getElementById("edit-file-input");
@@ -722,21 +954,14 @@ function renderEditorialCards() {
     const row = document.createElement("div");
     row.className = "edit-card-row";
 
-    const sel = document.createElement("select");
-    sel.className = "edit-card-select";
-    ["Slides", "Exercicios", "Desafios"].forEach(opt => {
-      const o = document.createElement("option");
-      o.value = opt;
-      o.textContent = opt;
-      if (opt === item.subfolder) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.addEventListener("change", () => {
-      editorialFiles[idx].subfolder = sel.value;
-      sortEditorialFiles();
-      renderEditorialCards();
-    });
-    row.appendChild(sel);
+    const cls = classifyMaterial(item.name);
+    const titleLabel = document.createElement("span");
+    titleLabel.textContent = cls?.title || item.subfolder;
+    titleLabel.style.cssText = `
+      font-size:11px;font-weight:600;color:#0d1117;flex:1;
+      white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+    `;
+    row.appendChild(titleLabel);
 
     const upBtn = document.createElement("button");
     upBtn.className = "edit-card-copy";
@@ -958,15 +1183,42 @@ if (editPublishBtn) {
       return;
     }
 
-    let okCount = 0, failCount = 0;
+    // Busca materiais já publicados por seção para evitar duplicatas
+    logPublish("Verificando materiais já publicados…");
+    const existingBySection = {};
+    const aulasParaVerificar = Object.keys(byAula).map(Number);
+    await Promise.all(aulasParaVerificar.map(async aula => {
+      const sectionId = sectionsMap[aula];
+      if (!sectionId) return;
+      try {
+        const existing = await fetchSectionMaterials(courseId, sectionId);
+        existingBySection[sectionId] = new Set(existing.map(m => m.title.trim().toLowerCase()));
+      } catch (_) {
+        existingBySection[sectionId] = new Set();
+      }
+    }));
+
+    let okCount = 0, failCount = 0, skipCount = 0;
     for (const aulaStr of Object.keys(byAula).sort((a, b) => +a - +b)) {
       const aula = parseInt(aulaStr, 10);
       const sectionId = sectionsMap[aula];
       const mats = byAula[aula];
       if (!sectionId) { logPublish(`Aula ${aula}: section não encontrada — pulado (${mats.length} materiais).`); failCount++; continue; }
-      logPublish(`Aula ${aula} (section ${sectionId}): enviando ${mats.length} material(is)…`);
+
+      const existingTitles = existingBySection[sectionId] || new Set();
+      const novos = mats.filter(m => !existingTitles.has(m.title.trim().toLowerCase()));
+      const duplicados = mats.filter(m => existingTitles.has(m.title.trim().toLowerCase()));
+
+      duplicados.forEach(m => {
+        logPublish(`Aula ${aula}: pulado (já existe) — ${m.title}`);
+        skipCount++;
+      });
+
+      if (novos.length === 0) { logPublish(`Aula ${aula}: nada novo para publicar.`); continue; }
+
+      logPublish(`Aula ${aula} (section ${sectionId}): publicando ${novos.length} material(is)…`);
       try {
-        await publishMaterialsForSection(courseId, sectionId, mats);
+        await publishMaterialsForSection(courseId, sectionId, novos);
         logPublish(`Aula ${aula}: OK`);
         okCount++;
       } catch (e) {
@@ -974,7 +1226,7 @@ if (editPublishBtn) {
         failCount++;
       }
     }
-    logPublish(`\nConcluído: ${okCount} aula(s) OK, ${failCount} com erro.`);
+    logPublish(`\nConcluído: ${okCount} aula(s) OK, ${skipCount} material(is) ignorado(s) por duplicata, ${failCount} com erro.`);
     editPublishBtn.disabled = false;
   });
 }
