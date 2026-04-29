@@ -716,6 +716,43 @@ function renderMatResults(sections) {
 
   const courseId = matListCourseIdInput.value.trim();
 
+  // Coleta todos os materiais com ID de deleção
+  const allDeletable = withMaterials.flatMap(sec =>
+    sec.materials.filter(m => m.materialId).map(m => ({ ...m, sectionId: sec.sectionId }))
+  );
+
+  if (allDeletable.length > 0) {
+    const removeAllBtn = document.createElement("button");
+    removeAllBtn.textContent = `Remover todos (${allDeletable.length})`;
+    removeAllBtn.style.cssText = `
+      width:100%;padding:8px;font-size:12px;font-weight:700;font-family:inherit;
+      background:none;border:1.5px solid #CA3328;color:#CA3328;
+      border-radius:8px;cursor:pointer;margin-bottom:8px;
+    `;
+    removeAllBtn.addEventListener("click", async () => {
+      removeAllBtn.disabled = true;
+      const total = allDeletable.length;
+      let done = 0;
+      removeAllBtn.textContent = `Removendo 0/${total}…`;
+
+      const CONCURRENCY = 4;
+      const queue = [...allDeletable];
+      const worker = async () => {
+        while (queue.length > 0) {
+          const m = queue.shift();
+          await deleteSupportMaterial(courseId, m.sectionId, m.materialId, document.createElement("div"));
+          done++;
+          removeAllBtn.textContent = `Removendo ${done}/${total}…`;
+        }
+      };
+
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker));
+      removeAllBtn.textContent = `✓ ${done} removido(s)`;
+      matListStatus.textContent = `Busque novamente para atualizar a lista.`;
+    });
+    matListResults.appendChild(removeAllBtn);
+  }
+
   withMaterials.forEach(sec => {
     const card = document.createElement("div");
     card.className = "mat-section-card";
