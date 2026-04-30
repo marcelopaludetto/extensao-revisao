@@ -2618,6 +2618,7 @@ function parseAvalDoc(text) {
   let current = null;
   let currentAlt = null; // alternativa sendo acumulada (pode ser multilinhas)
   let inExplanations = false; // true entre "Alternativa X: Correta/Incorreta" e próxima Questão
+  let collectingExpected = false; // true entre "Resposta esperada:" e o terminador (critérios/justificativa)
 
   function flushAlt() {
     if (currentAlt && current) {
@@ -2649,10 +2650,33 @@ function parseAvalDoc(text) {
       const cleanName = qMatch[2].trim().replace(/^\*{1,3}/, "").replace(/\*{1,3}$/, "").trim();
       current = { num: parseInt(qMatch[1]), name: cleanName, text: "", alts: [] };
       inExplanations = false;
+      collectingExpected = false;
       continue;
     }
 
     if (!current) continue;
+
+    // Discursiva: "Resposta esperada:" inicia coleta da resposta esperada,
+    // "Justificativa para correção:" / "Critérios de pontuação:" encerram.
+    if (/^Resposta esperada\s*[:：]/i.test(line)) {
+      flushAlt();
+      current.tipo = "discursive";
+      current.expectedAnswer = "";
+      collectingExpected = true;
+      continue;
+    }
+    if (collectingExpected) {
+      if (/^(Justificativa para corre[çc][ãa]o|Crit[ée]rios de pontua[çc][ãa]o)\s*[:：]?/i.test(line)) {
+        collectingExpected = false;
+        inExplanations = true; // ignora o resto até a próxima "Questão N"
+        continue;
+      }
+      current.expectedAnswer = current.expectedAnswer
+        ? current.expectedAnswer + "\n" + line
+        : line;
+      continue;
+    }
+
     // Uma vez em modo explicação, só processamos gabaritos; todo resto é descartado.
     if (inExplanations) {
       const explainOnly = line.match(/^Alternativa\s+([A-E])[\s,:.\-–—]+(correta|incorreta)/i);
@@ -2707,6 +2731,30 @@ function parseAvalDoc(text) {
     const explainMatch = line.match(/^Alternativa\s+([A-E])[\s,:.\-–—]+(correta|incorreta)/i);
     if (explainMatch) {
       flushAlt(); // fecha a última alternativa antes de entrar na seção de explicações
+
+      // Inferência de alternativas sem prefixo "a)": se o gabarito apareceu mas
+      // current.alts está vazio, descobre quantas alternativas existem (contando
+      // letras únicas em "Alternativa X:" até a próxima Questão) e usa as últimas
+      // N linhas não-vazias do enunciado como alternativas.
+      if (current.alts.length === 0 && current.text) {
+        const seen = new Set();
+        for (let j = i; j < lines.length; j++) {
+          const lj = stripEmphasis(lines[j].trim());
+          if (/^Questão\s+\d+\s*[–\-—]/i.test(lj)) break;
+          const m = lj.match(/^Alternativa\s+([A-E])[\s,:.\-–—]/i);
+          if (m) seen.add(m[1].toUpperCase());
+        }
+        const altCount = seen.size;
+        const enunLines = current.text.split("\n").map(l => l.trim()).filter(Boolean);
+        if (altCount >= 2 && enunLines.length >= altCount) {
+          const altLines = enunLines.slice(-altCount);
+          const enunRest  = enunLines.slice(0, -altCount);
+          current.text = enunRest.join("\n");
+          const letters = ["A","B","C","D","E"];
+          current.alts = altLines.map((text, idx) => ({ letter: letters[idx], text }));
+        }
+      }
+
       if (explainMatch[2].toLowerCase() === "correta") {
         current.correctAlt = explainMatch[1].toUpperCase();
       }
@@ -2853,7 +2901,7 @@ function renderAvalCards(parsed) {
 
     const lbl = document.createElement("div");
     lbl.className = "aval-card-label";
-    lbl.textContent = `Questão ${q.num}`;
+    lbl.textContent = `Questão ${q.num}${q.tipo === "discursive" ? " · 💬 Discursiva" : ""}`;
 
     const qName = document.createElement("div");
     qName.style.cssText = "font-size:11px;font-weight:700;color:#0d1117;margin-bottom:4px;";
@@ -2900,6 +2948,19 @@ function renderAvalCards(parsed) {
       altEl.textContent = `${a.letter}) ${a.text}${isCorrect ? " ✓" : ""}`;
       card.appendChild(altEl);
     });
+
+    if (q.tipo === "discursive" && q.expectedAnswer) {
+      const expLabel = document.createElement("div");
+      expLabel.style.cssText = "font-size:10px;font-weight:700;color:#1a7f37;margin-top:6px;";
+      expLabel.textContent = "Resposta esperada:";
+      card.appendChild(expLabel);
+
+      const expEl = document.createElement("div");
+      expEl.className = "aval-card-text";
+      expEl.style.cssText = "color:#1a7f37;";
+      expEl.textContent = q.expectedAnswer;
+      card.appendChild(expEl);
+    }
 
     const footer = document.createElement("div");
     footer.className = "aval-card-footer";
@@ -2994,39 +3055,44 @@ async function handleAvalFile(file) {
 
   avalStatusEl.textContent = `${parsed.questions.length} questão(ões) encontrada(s).`;
   renderAvalCards(parsed);
+
+  // Auto-cria a estrutura na página com a quantidade exata de alternativas de cada questão
+  // e o tipo (múltipla escolha vs. discursiva) por questão.
+  const altsPerQuestion = parsed.questions.map(q => q.alts?.length || 0);
+  const questionTypes   = parsed.questions.map(q => q.tipo === "discursive" ? "DISCURSIVE" : "MULTIPLE_CHOICE");
+  if (altsPerQuestion.length > 0) {
+    avalCreateStructure(altsPerQuestion, questionTypes);
+  }
 }
 
-// ---------- Avaliação: criar estrutura (10 questões × 4 alternativas) ----------
-const avalCreateStructureBtn   = document.getElementById("aval-create-structure-btn");
-const avalCreateStructure5aBtn = document.getElementById("aval-create-structure-5a-btn");
-const avalStructureStatus      = document.getElementById("aval-structure-status");
+// ---------- Avaliação: criar estrutura (auto a partir do .docx) ----------
+const avalStructureStatus = document.getElementById("aval-structure-status");
 
-async function avalCreateStructure(totalAlts) {
-  const btn = totalAlts === 5 ? avalCreateStructure5aBtn : avalCreateStructureBtn;
-  btn.disabled = true;
-  avalStructureStatus.textContent = "Criando…";
+async function avalCreateStructure(altsPerQuestion, questionTypes) {
+  const totalQuestions = altsPerQuestion.length;
+  const summary = altsPerQuestion.map((a, i) =>
+    questionTypes?.[i] === "DISCURSIVE" ? "D" : String(a)
+  ).join("/");
+  avalStructureStatus.textContent = `Criando ${totalQuestions}Q (${summary})…`;
   try {
     const tab = await getActiveTab();
     const ack = await chrome.tabs.sendMessage(tab.id, {
       type: "ALURA_REVISOR_FILL_ASSESSMENT",
       field: "createStructure",
-      totalQuestions: 10,
-      totalAlts,
+      altsPerQuestion,
+      questionTypes,
     });
     if (ack?.ok) {
-      avalStructureStatus.textContent = `✅ ${ack.created || 10} questões criadas`;
+      avalStructureStatus.textContent = `✅ ${ack.created || totalQuestions} questões criadas (${summary})`;
     } else {
       avalStructureStatus.textContent = `❌ ${ack?.error || "Erro"}`;
     }
+    return ack;
   } catch (e) {
     avalStructureStatus.textContent = `❌ ${e.message}`;
-  } finally {
-    btn.disabled = false;
+    return { ok: false, error: e.message };
   }
 }
-
-if (avalCreateStructureBtn)   avalCreateStructureBtn.addEventListener("click",   () => avalCreateStructure(4));
-if (avalCreateStructure5aBtn) avalCreateStructure5aBtn.addEventListener("click", () => avalCreateStructure(5));
 
 if (avalFileInput) avalFileInput.addEventListener("change", (e) => handleAvalFile(e.target.files[0]));
 

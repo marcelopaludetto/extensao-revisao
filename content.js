@@ -3176,8 +3176,16 @@
           sendResponse({ ok: true, codeDivFound: !!codeDiv, hiddenFound: !!hidden });
 
         } else if (field === "createStructure") {
-          const totalQ = msg.totalQuestions || 10;
-          const totalA = msg.totalAlts      || 4;
+          // altsPerQuestion: array com qtde de alternativas por questão (ex.: [4,5,2,4,...])
+          // questionTypes: array paralelo "MULTIPLE_CHOICE" | "DISCURSIVE"
+          // Compatível com o formato antigo {totalQuestions, totalAlts} caso ainda seja usado.
+          const altsPerQuestion = Array.isArray(msg.altsPerQuestion)
+            ? msg.altsPerQuestion
+            : Array.from({ length: msg.totalQuestions || 10 }, () => msg.totalAlts || 4);
+          const questionTypes = Array.isArray(msg.questionTypes)
+            ? msg.questionTypes
+            : altsPerQuestion.map(() => "MULTIPLE_CHOICE");
+          const totalQ = altsPerQuestion.length;
 
           const addQBtn = document.querySelector(".assessment__questions__add");
           if (!addQBtn) {
@@ -3196,13 +3204,44 @@
             }
             if (!wrapper) continue;
 
-            // Adiciona alternativas até totalA (por contagem DOM, não por name)
-            const addAltBtn = wrapper.querySelector(".assessment__question__alternatives__add");
-            let altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
-            while (altCount < totalA) {
-              addAltBtn?.click();
-              await sleep(350);
-              altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
+            const qType = questionTypes[qi] || "MULTIPLE_CHOICE";
+
+            // Discursiva: troca o select questionType e dispara change.
+            // O script da página oculta o container de alternativas e exibe o discursivo.
+            if (qType === "DISCURSIVE") {
+              const sel = wrapper.querySelector("select.questionType");
+              if (sel && sel.value !== "DISCURSIVE") {
+                sel.value = "DISCURSIVE";
+                sel.dispatchEvent(new Event("change", { bubbles: true }));
+                await sleep(400);
+              }
+              created++;
+              continue;
+            }
+
+            // Múltipla escolha: ajusta a qtde de alternativas para bater exatamente com a questão.
+            const targetA = altsPerQuestion[qi] || 0;
+            if (targetA > 0) {
+              const addAltBtn = wrapper.querySelector(".assessment__question__alternatives__add");
+              let altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
+
+              // Adiciona se faltam
+              let safety = 10;
+              while (altCount < targetA && safety-- > 0) {
+                addAltBtn?.click();
+                await sleep(350);
+                altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
+              }
+
+              // Remove se sobram (sempre da última)
+              safety = 10;
+              while (altCount > targetA && safety-- > 0) {
+                const removes = wrapper.querySelectorAll(".assessment__alternative__options__remove");
+                if (!removes.length) break;
+                removes[removes.length - 1].click();
+                await sleep(350);
+                altCount = wrapper.querySelectorAll(".assessment__question__alternative").length;
+              }
             }
             created++;
           }
@@ -3235,49 +3274,85 @@
             return;
           }
 
-          // Enunciado: .assessment__question--alternative (hífen, não underscore)
-          const qSection = wrapper.querySelector(".assessment__question--alternative");
-          await fillHked(qSection, q.text || "");
-          setHidden(
-            qSection?.querySelector("input.hackeditor-sync"),
-            `<p>${(q.text || "").replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>")}</p>`
-          );
-
-          // Alternativas: seleciona por posição DOM — name é incorreto nas alternativas dinâmicas (C, D...)
-          const altBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
-          for (let j = 0; j < (q.alts || []).length; j++) {
-            const altBlock = altBlocks[j];
-            if (!altBlock) continue;
-            await fillHked(altBlock, q.alts[j].text);
-            setHidden(altBlock.querySelector("input.hackeditor-sync"), `<p>${q.alts[j].text}</p>`);
-          }
-
-          // Aguarda DOM estabilizar após os execCommands antes de clicar no radio
-          await sleep(500);
-          document.activeElement?.blur();
-
           const debugRadio = { correctAlt: q.correctAlt, correctIdx: -1, radioFound: false, checkedBefore: null, checkedAfter: null };
 
-          if (q.correctAlt) {
-            const correctIdx = (q.alts || []).findIndex(a => a.letter === q.correctAlt);
-            debugRadio.correctIdx = correctIdx;
-            if (correctIdx >= 0) {
-              const freshBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
-              debugRadio.totalBlocks = freshBlocks.length;
-              const radio = freshBlocks[correctIdx]?.querySelector('input[type="radio"]');
-              debugRadio.radioFound = !!radio;
-              if (radio) {
-                debugRadio.checkedBefore = radio.checked;
-                radio.click();
-                await sleep(200);
-                debugRadio.checkedAfter = radio.checked;
+          if (q.tipo === "discursive") {
+            // Discursiva: troca o tipo no select (se necessário) e preenche
+            // editor de pergunta + textarea de resposta esperada.
+            const sel = wrapper.querySelector("select.questionType");
+            if (sel && sel.value !== "DISCURSIVE") {
+              sel.value = "DISCURSIVE";
+              sel.dispatchEvent(new Event("change", { bubbles: true }));
+              await sleep(400);
+            }
+
+            const dSection = wrapper.querySelector(".assessment__question--discursive");
+            // Two-pass fill: o CodeMirror desse editor fica "frio" enquanto o
+            // .discursiveQuestionContainer está com a classe hidden (até a troca
+            // de tipo), e a primeira chamada execCommand não insere texto. A
+            // primeira passada acorda o editor, a segunda preenche de fato.
+            // Equivale ao que o usuário observou ao clicar em "Repreencher".
+            await fillHked(dSection, q.text || "");
+            await sleep(150);
+            await fillHked(dSection, q.text || "");
+            setHidden(
+              dSection?.querySelector("input.hackeditor-sync"),
+              `<p>${(q.text || "").replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>")}</p>`
+            );
+
+            const expected = wrapper.querySelector('textarea[name="expectedAnswer"]');
+            if (expected && q.expectedAnswer) {
+              expected.value = q.expectedAnswer;
+              expected.dispatchEvent(new Event("input",  { bubbles: true }));
+              expected.dispatchEvent(new Event("change", { bubbles: true }));
+            }
+
+            await sleep(300);
+            document.activeElement?.blur();
+          } else {
+            // Múltipla escolha: enunciado + alternativas + radio.
+            // Enunciado: .assessment__question--alternative (hífen, não underscore)
+            const qSection = wrapper.querySelector(".assessment__question--alternative");
+            await fillHked(qSection, q.text || "");
+            setHidden(
+              qSection?.querySelector("input.hackeditor-sync"),
+              `<p>${(q.text || "").replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>")}</p>`
+            );
+
+            // Alternativas: seleciona por posição DOM — name é incorreto nas alternativas dinâmicas (C, D...)
+            const altBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
+            for (let j = 0; j < (q.alts || []).length; j++) {
+              const altBlock = altBlocks[j];
+              if (!altBlock) continue;
+              await fillHked(altBlock, q.alts[j].text);
+              setHidden(altBlock.querySelector("input.hackeditor-sync"), `<p>${q.alts[j].text}</p>`);
+            }
+
+            // Aguarda DOM estabilizar após os execCommands antes de clicar no radio
+            await sleep(500);
+            document.activeElement?.blur();
+
+            if (q.correctAlt) {
+              const correctIdx = (q.alts || []).findIndex(a => a.letter === q.correctAlt);
+              debugRadio.correctIdx = correctIdx;
+              if (correctIdx >= 0) {
+                const freshBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
+                debugRadio.totalBlocks = freshBlocks.length;
+                const radio = freshBlocks[correctIdx]?.querySelector('input[type="radio"]');
+                debugRadio.radioFound = !!radio;
+                if (radio) {
+                  debugRadio.checkedBefore = radio.checked;
+                  radio.click();
+                  await sleep(200);
+                  debugRadio.checkedAfter = radio.checked;
+                }
+                freshBlocks.forEach((block, idx) => {
+                  const hidden = block.querySelector("input.correct-alternative");
+                  if (!hidden) return;
+                  hidden.value = idx === correctIdx ? "true" : "false";
+                  hidden.dispatchEvent(new Event("change", { bubbles: true }));
+                });
               }
-              freshBlocks.forEach((block, idx) => {
-                const hidden = block.querySelector("input.correct-alternative");
-                if (!hidden) return;
-                hidden.value = idx === correctIdx ? "true" : "false";
-                hidden.dispatchEvent(new Event("change", { bubbles: true }));
-              });
             }
           }
 
@@ -3404,9 +3479,7 @@
             }
           }
 
-          sendResponse({ ok: true, debugRadio, skillDebug });
-
-          sendResponse({ ok: true });
+          sendResponse({ ok: true, debugRadio, skillDebug, discursive: q.tipo === "discursive" });
 
         } else {
           sendResponse({ ok: false, error: `Campo desconhecido: ${field}` });
