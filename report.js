@@ -1,5 +1,5 @@
 (() => {
-  const USAGE_LOG_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbwZJy91IkcwIHbaFbg6xGNb9BNZ6PZYKT4q8IuI8RFNDGdTe_mp8kv0DG7UC-ZsfXY/exec";
+  const USAGE_LOG_WEB_APP_URL = "https://script.google.com/macros/s/AKfycbw5YVSPvbk6ide40TKoWsZVcxI5QE1gr9pBG2avgLcWALjDejxG8g8ruxsSrQTbHHk/exec";
   const USAGE_LOG_TIMEOUT_MS = 15000;
   const USAGE_LOG_QUEUE_KEY = "aluraRevisorUsageLogQueue";
   const USAGE_LOG_MAX_QUEUE = 500;
@@ -130,8 +130,11 @@
         const parsed = JSON.parse(text);
         if (parsed?.ok === false) throw new Error(parsed?.error || "Apps Script rejected the log entry");
       } catch (e) {
-        if (!(e instanceof SyntaxError)) throw e;
+        if (e instanceof SyntaxError) throw new Error(`Apps Script returned non-JSON: ${text.slice(0, 200)}`);
+        throw e;
       }
+    } else {
+      throw new Error("Apps Script returned empty response");
     }
 
     return { ok: true, feature: data.feature, courseId: data.courseId, count: data.count };

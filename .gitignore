@@ -1,0 +1,12 @@
+# Documentos com conteúdo de cursos (avaliações, materiais docentes)
+*.docx
+*.xlsx
+
+# Configurações do Claude Code (memória e contexto de sessão)
+.claude/
+CLAUDE.md
+
+# Sistema operacional
+Thumbs.db
+Desktop.ini
+.DS_Store
