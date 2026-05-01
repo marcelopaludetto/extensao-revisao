@@ -1,6 +1,27 @@
 const KEY = "aluraRevisorRunState";
 const KEY_HISTORY = "aluraRevisorHistory";
 
+function logFeatureUsage(feature, action, data = {}) {
+  const { courseId = "", courseName = "", count = 1, metadata = {} } = data;
+  return new Promise(resolve => {
+    chrome.runtime.sendMessage({
+      type: "ALURA_REVISOR_LOG_USAGE",
+      entry: {
+        eventType: "feature_usage",
+        feature,
+        action,
+        courseId,
+        courseName,
+        count,
+        metadata,
+      },
+    }, resp => {
+      if (chrome.runtime.lastError) return resolve({ ok: false, error: chrome.runtime.lastError.message });
+      resolve(resp);
+    });
+  });
+}
+
 // ---------- Ordem das atividades ----------
 const ACTIVITY_ORDERS = {
   startlab: [
@@ -995,6 +1016,15 @@ async function uploadEditorialItem(idx) {
 
     await uploadToR2(item.file, key, r2AccessKey, r2SecretKey);
     item.status = "done";
+    await logFeatureUsage("r2_material_upload", "uploaded", {
+      courseId: extractCourseId(folder) || "",
+      metadata: {
+        fileName: item.name,
+        subfolder: item.subfolder,
+        objectKey: key,
+        size: item.file?.size || 0,
+      },
+    });
   } catch (e) {
     item.status = "error";
     item.error = e.message || String(e);
@@ -2885,6 +2915,17 @@ function renderAvalCards(parsed) {
     }
 
     allStatus.textContent = `✅ ${ok} preenchida(s)${fail ? ` · ❌ ${fail} falhou` : ""}`;
+    if (ok === total && fail === 0) {
+      const tab = await getActiveTab().catch(() => null);
+      const courseId = tab?.url?.match(/\/assessment\/create\/start\/(\d+)/)?.[1] || "";
+      await logFeatureUsage("assessment_published", "filled_from_docx", {
+        courseId,
+        metadata: {
+          questions: total,
+          source: "assessment_docx_fill_all",
+        },
+      });
+    }
     allBtn.disabled = false;
     allBtn.style.opacity = "1";
     allBtn.textContent = `▶ Preencher todas novamente`;
@@ -3611,9 +3652,8 @@ batchAuditBtn.addEventListener("click", async () => {
     transcription: document.getElementById("audit-transcription").checked,
     pt: document.getElementById("audit-pt").checked,
     esp: document.getElementById("audit-esp").checked,
-    downloadTextual: document.getElementById("audit-download-textual").checked,
   };
-  if (!checks.transcription && !checks.pt && !checks.esp && !checks.downloadTextual) {
+  if (!checks.transcription && !checks.pt && !checks.esp) {
     batchStatusEl.textContent = "Marque ao menos um item para auditar.";
     return;
   }
@@ -3645,4 +3685,3 @@ batchAuditBtn.addEventListener("click", async () => {
   if (githubTokenEl && data.aluraRevisorGithubToken)
     githubTokenEl.value = data.aluraRevisorGithubToken;
 })();
-

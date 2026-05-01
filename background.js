@@ -1,4 +1,10 @@
+if (typeof self.UsageReport === "undefined" && typeof importScripts === "function") {
+  importScripts("report.js");
+}
+
+const UsageReport = self.UsageReport;
 const ALURA_ORIGIN = "https://cursos.alura.com.br";
+const EXTENSION_ORIGIN = new URL(chrome.runtime.getURL("")).origin;
 
 function applyActionPopupForTab(tab) {
   if (!tab || !tab.id) return;
@@ -16,9 +22,11 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 chrome.runtime.onInstalled.addListener(() => {
   chrome.tabs.query({}, (tabs) => tabs.forEach(applyActionPopupForTab));
+  UsageReport.flushQueuedUsageLogs().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
   chrome.tabs.query({}, (tabs) => tabs.forEach(applyActionPopupForTab));
+  UsageReport.flushQueuedUsageLogs().catch(() => {});
 });
 
 chrome.action.onClicked.addListener((tab) => {
@@ -45,8 +53,51 @@ async function getGithubToken() {
 
 function isValidSender(sender) {
   const origin = sender?.url ? new URL(sender.url).origin : "";
-  return origin === "https://cursos.alura.com.br";
+  return origin === ALURA_ORIGIN || origin === EXTENSION_ORIGIN;
 }
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_LOG_CAPTION_REQUESTS") return;
+
+  (async () => {
+    const entries = Array.isArray(msg.entries) ? msg.entries : [];
+    const results = [];
+
+    for (const entry of entries) {
+      const data = UsageReport.normalizeCaptionLogEntry(entry);
+      if (!data.courseId || data.count <= 0) continue;
+
+      results.push(await UsageReport.queueUsageLogEntry(data));
+    }
+
+    const failed = results.filter(r => !r.ok);
+    sendResponse({ ok: failed.length === 0, logged: results.length - failed.length, failed });
+  })();
+
+  return true;
+});
+
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!isValidSender(sender)) return;
+  if (msg?.type !== "ALURA_REVISOR_LOG_USAGE") return;
+
+  (async () => {
+    const entries = Array.isArray(msg.entries) ? msg.entries : [msg.entry || msg];
+    const results = [];
+
+    for (const entry of entries) {
+      const data = UsageReport.normalizeUsageLogEntry(entry);
+      if (!data.feature || data.count <= 0) continue;
+      results.push(await UsageReport.queueUsageLogEntry(data));
+    }
+
+    const failed = results.filter(r => !r.ok);
+    sendResponse({ ok: failed.length === 0, logged: results.length - failed.length, failed });
+  })();
+
+  return true;
+});
 
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
@@ -504,7 +555,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         })
       });
 
-      sendResponse({ ok: resp.status === 201 });
+      const ok = resp.status === 201;
+      if (ok) {
+        await UsageReport.queueFeatureUsageLog("icon_uploaded", "uploaded", msg, {
+          categorySlug,
+          courseSlug,
+        });
+      }
+      sendResponse({ ok });
     } catch (e) {
       sendResponse({
         ok: false,
@@ -596,6 +654,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const result = results?.[0]?.result ?? { tasks: [], reordered: false };
       if (result.reordered) {
         await new Promise(resolve => setTimeout(resolve, 1500));
+        await UsageReport.queueFeatureUsageLog("activity_order_fixed", "inactive_tasks_reordered", msg, {
+          sectionId: msg.sectionId,
+          autoFix: true,
+        });
       }
       const tasksWithAdminUrl = result.tasks.map(t => {
         const taskId = t.editUrl.match(/\/task\/edit\/(\d+)/)?.[1];
@@ -662,9 +724,57 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
 
       const r = result?.[0]?.result ?? { videoName: "", hasPortugues: false, hasEspanhol: false };
-      sendResponse({ ok: true, ...r });
+
+      // Se faltar PT ou ES (entre os idiomas verificados), solicita geração via
+      // POST direto no endpoint do form "Gerar legenda" (mesma sessão da aba).
+      let legendaSolicitada = false;
+      let usageLog = null;
+      const faltaAlguma = (checks.pt && !r.hasPortugues) || (checks.esp && !r.hasEspanhol);
+      if (faltaAlguma) {
+        try {
+          const out = await chrome.scripting.executeScript({
+            target: { tabId },
+            func: async () => {
+              const btn = [...document.querySelectorAll('button[type="submit"], input[type="submit"]')]
+                .find(b => /gerar\s+legenda/i.test((b.textContent || b.value || "").trim()));
+              if (!btn) return { ok: false, reason: "botão não encontrado" };
+
+              const form = btn.closest("form");
+              if (!form) return { ok: false, reason: "form não encontrado" };
+
+              const action = form.action;
+              const method = (form.method || "POST").toUpperCase();
+              const body = new FormData(form);
+
+              try {
+                const resp = await fetch(action, {
+                  method,
+                  body: method === "GET" ? undefined : body,
+                  credentials: "include",
+                  headers: { "X-Requested-With": "XMLHttpRequest" },
+                });
+                return { ok: resp.ok, status: resp.status, action };
+              } catch (e) {
+                return { ok: false, reason: "fetch error: " + (e?.message || String(e)) };
+              }
+            },
+          });
+          legendaSolicitada = !!out?.[0]?.result?.ok;
+          if (legendaSolicitada) {
+            try {
+              usageLog = await UsageReport.queueUsageLogEntry(UsageReport.buildCaptionUsageLogEntry(msg));
+            } catch (e) {
+              usageLog = { ok: false, queued: false, error: e?.message || String(e) };
+            }
+          }
+        } catch (_) {
+          // silencioso: falha ao solicitar não bloqueia a auditoria
+        }
+      }
+
+      sendResponse({ ok: true, ...r, legendaSolicitada, usageLog });
     } catch (err) {
-      sendResponse({ ok: false, videoName: "", hasPortugues: false, hasEspanhol: false, error: err?.message });
+      sendResponse({ ok: false, videoName: "", hasPortugues: false, hasEspanhol: false, legendaSolicitada: false, error: err?.message });
     } finally {
       if (tabId != null) chrome.tabs.remove(tabId).catch(() => {});
     }
@@ -1476,6 +1586,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Aguarda o form POST recarregar a página
       await new Promise(r => setTimeout(r, 500));
       await waitForTabComplete(tabId, 10000);
+      await UsageReport.queueFeatureUsageLog("activity_order_fixed", "section_tasks_reordered", msg, {
+        sectionId: msg.sectionId,
+        orderedTaskCount: Array.isArray(msg.orderedTaskIds) ? msg.orderedTaskIds.length : 0,
+        autoFix: false,
+      });
 
       sendResponse({ ok: true });
     } catch (e) {
@@ -1668,6 +1783,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
 
       await new Promise(r => setTimeout(r, 2500));
+      await UsageReport.queueFeatureUsageLog("activity_published", "do_after_me_published", msg, {
+        lessonNum: msg.lessonNum,
+        activityType: "FEZ",
+      });
       sendResponse({ ok: true });
 
     } catch (e) {
@@ -1843,6 +1962,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // Aguardar o salvamento processar
       await new Promise(r => setTimeout(r, 2500));
+      await UsageReport.queueFeatureUsageLog("challenge_published", "challenge_published", msg, {
+        lessonNum: msg.lessonNum,
+      });
       sendResponse({ ok: true });
 
     } catch (e) {
@@ -2006,6 +2128,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
 
       await new Promise(r => setTimeout(r, 2500));
+      await UsageReport.queueFeatureUsageLog("activity_published", "activity_published", msg, {
+        lessonNum: msg.lessonNum,
+        activityType: msg.activityType,
+        activityTitle,
+      });
       sendResponse({ ok: true });
 
     } catch (e) {
@@ -2580,6 +2707,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: () => { document.querySelector("#submitTask")?.click(); }
       });
       await new Promise(r => setTimeout(r, 2500));
+      await UsageReport.queueFeatureUsageLog("exercise_created", "exercise_created", msg, {
+        lessonNum,
+        exerciseType: exercicio?.tipo || "",
+        exerciseTitle: exercicio?.questNome || "",
+      });
       sendResponse({ ok: true, debugFeedback: feedbackDebug || null });
 
     } catch (e) {

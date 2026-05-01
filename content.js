@@ -1124,12 +1124,12 @@
         nextStepBtn.disabled = true;
         nextStepBtn.textContent = "Carregando...";
         overlay.remove();
-        await showSectionTasksStep(state.courseId, 0, null, state.platform || null, []);
+        await showSectionTasksStep(state.courseId, 0, null, state.platform || null);
       });
     }
   }
 
-  async function showSectionTasksStep(courseId, sectionIndex = 0, cachedSections = null, platform = null, missingCodes = []) {
+  async function showSectionTasksStep(courseId, sectionIndex = 0, cachedSections = null, platform = null) {
     const { modal, overlay } = createOverlayModal("720px");
     modal.innerHTML = `
       <div style="padding-bottom:16px; border-bottom:2px solid #f0f0f0; margin-bottom:4px;">
@@ -1184,15 +1184,23 @@
 
           if (/vídeo|video/i.test(t.type)) {
             const transcricao = result.transcriptionText?.trim().length > 0;
-            let legendaPT = null, legendaES = null, uploaderCode = null;
+            let legendaPT = null, legendaES = null, uploaderCode = null, legendaSolicitada = false;
             const rawCode = result.videoUrl;
             if (rawCode && rawCode !== "0") {
               uploaderCode = rawCode.includes("/") ? rawCode.split("/")[1] : rawCode;
-              const info = await getVideoInfo(uploaderCode, { pt: true, esp: true });
+              const taskId = t.editUrl.match(/\/task\/edit\/(\d+)/)?.[1] ?? "";
+              const info = await getVideoInfo(uploaderCode, { pt: true, esp: true }, {
+                courseId,
+                taskId,
+                taskTitle: t.title,
+                sectionTitle: section.title,
+                source: "section_tasks_step",
+              });
               legendaPT = info.hasPortugues;
               legendaES = info.hasEspanhol;
+              legendaSolicitada = info.legendaSolicitada;
             }
-            videoMap[t.editUrl] = { transcricao, legendaPT, legendaES, uploaderCode };
+            videoMap[t.editUrl] = { transcricao, legendaPT, legendaES, uploaderCode, legendaSolicitada };
           }
         } catch(e) {
           console.error("[Revisor] check error:", t.title, e);
@@ -1215,7 +1223,8 @@
           if (v) {
             badge = (v.transcricao ? ok("Transcrição") : nok("Transcrição"))
                   + (v.legendaPT === true ? ok("PT") : v.legendaPT === false ? nok("PT") : "")
-                  + (v.legendaES === true ? ok("ES") : v.legendaES === false ? nok("ES") : "");
+                  + (v.legendaES === true ? ok("ES") : v.legendaES === false ? nok("ES") : "")
+                  + (v.legendaSolicitada ? `<span style="color:#f57c00; font-weight:600; margin-left:6px;" title="Geração de legenda solicitada automaticamente">📝 Geração solicitada</span>` : "");
           }
         }
         const link = t.editUrl
@@ -1278,7 +1287,7 @@
                 // Recarrega a seção para refletir a nova ordem
                 setTimeout(() => {
                   overlay.remove();
-                  showSectionTasksStep(courseId, sectionIndex, null, platform, missingCodes);
+                  showSectionTasksStep(courseId, sectionIndex, null, platform);
                 }, 1200);
               } else {
                 fixBtn.textContent = `❌ ${resp?.error || "Erro ao ajustar"}`;
@@ -1299,15 +1308,6 @@
         content.appendChild(orderDiv);
       }
 
-      // Acumula códigos de vídeo com legenda faltando
-      for (const t of tasks) {
-        if (!/vídeo|video/i.test(t.type)) continue;
-        const v = videoMap[t.editUrl];
-        if (v?.uploaderCode && (v.legendaPT === false || v.legendaES === false)) {
-          if (!missingCodes.includes(v.uploaderCode)) missingCodes.push(v.uploaderCode);
-        }
-      }
-
       // Botão próxima aula
       if (sectionIndex + 1 < totalSections) {
         const nextBtn = document.createElement("button");
@@ -1315,21 +1315,9 @@
         nextBtn.style.cssText = "padding:9px 18px; border:0; border-radius:8px; cursor:pointer; background:#1565c0; color:#fff; font-size:14px; font-weight:600;";
         nextBtn.addEventListener("click", () => {
           overlay.remove();
-          showSectionTasksStep(courseId, sectionIndex + 1, sections, platform, missingCodes);
+          showSectionTasksStep(courseId, sectionIndex + 1, sections, platform);
         });
         footer.insertBefore(nextBtn, footer.querySelector("#aluraRevisorClose"));
-      } else if (missingCodes.length > 0) {
-        // Última seção: botão copiar códigos sem legenda
-        const copyBtn = document.createElement("button");
-        copyBtn.style.cssText = "padding:9px 18px; border:0; border-radius:8px; cursor:pointer; background:#f57c00; color:#fff; font-size:13px; font-weight:600; font-family:inherit;";
-        copyBtn.textContent = `Copiar ${missingCodes.length} código(s) sem legenda`;
-        copyBtn.addEventListener("click", () => {
-          navigator.clipboard.writeText(missingCodes.join("\n")).then(() => {
-            copyBtn.textContent = "Copiado!";
-            setTimeout(() => { copyBtn.textContent = `Copiar ${missingCodes.length} código(s) sem legenda`; }, 1500);
-          });
-        });
-        footer.insertBefore(copyBtn, footer.querySelector("#aluraRevisorClose"));
       }
 
     } catch (e) {
@@ -1368,6 +1356,30 @@
     state.finished = !error;
     state.error = error || null;
     await setState(state);
+    try {
+      await sendToBackground({
+        type: "ALURA_REVISOR_LOG_USAGE",
+        entry: {
+          eventType: "feature_usage",
+          feature: "unit_review_completed",
+          action: state.finished ? "completed" : "interrupted",
+          courseId: state.courseId || "",
+          courseName: state._courseName || "",
+          count: 1,
+          metadata: {
+            productType: state.productType || "",
+            platform: state.platform || "",
+            finished: !!state.finished,
+            error: state.error || "",
+            steps: state.steps || 0,
+            iconStatus: state.iconStatus || "",
+            totalActiveVideos: state.totalActiveVideos || 0,
+          },
+        },
+      });
+    } catch (e) {
+      console.warn("[Revisor] Falha ao registrar revisao de unidade", e);
+    }
     showFinalPopup(state);
   }
 
@@ -1856,64 +1868,122 @@
   // ---------- Revisão de transcrição ----------
   // Abre video-uploader.alura.com.br/video/{uploaderCode} uma única vez
   // e retorna nome do vídeo + presença de legendas PT/ESP.
-  async function getVideoInfo(uploaderCode, checks) {
+  async function getVideoInfo(uploaderCode, checks, logContext = {}) {
     return await new Promise(resolve => {
       chrome.runtime.sendMessage(
-        { type: "ALURA_REVISOR_GET_VIDEO_INFO", uploaderCode, checks },
+        { type: "ALURA_REVISOR_GET_VIDEO_INFO", uploaderCode, checks, logContext },
         resp => resolve({
-          videoName:    resp?.videoName    ?? "",
-          hasPortugues: resp?.hasPortugues ?? false,
-          hasEspanhol:  resp?.hasEspanhol  ?? false,
+          videoName:        resp?.videoName        ?? "",
+          hasPortugues:     resp?.hasPortugues     ?? false,
+          hasEspanhol:      resp?.hasEspanhol      ?? false,
+          legendaSolicitada: resp?.legendaSolicitada ?? false,
+          usageLog:         resp?.usageLog         ?? null,
         })
       );
     });
   }
 
-  async function auditCourseTranscription(courseId, checks) {
+  async function auditCourseTranscription(courseId, checks, courseName = "") {
     const sections = await getAdminSections(courseId);
-    const results = [];
 
-    for (const section of sections.filter(s => s.active)) {
-      const { tasks } = await getAdminSectionTasks(courseId, section.id);
+    // Coleta tarefas de vídeo em paralelo (pool de 4 seções por vez),
+    // tolerante a falhas individuais e preservando a ordem das seções.
+    const activeSections = sections.filter(s => s.active);
+    const sectionTaskLists = new Array(activeSections.length);
+    let sectionCursor = 0;
+    const SECTION_CONCURRENCY = 2;
 
-      for (const task of tasks) {
-        if (task.type !== "Vídeo") continue;
-
-        const { videoUrl, transcriptionText } = await getAdminTaskContent(task.editUrl);
-        const hasUrl = videoUrl && videoUrl.trim() !== "0" && videoUrl.trim() !== "";
-        if (!hasUrl) continue;
-
-        const hasTranscription = (transcriptionText || "").replace(/\s+/g, "").length > 50;
-
-        let hasEspanhol = true, hasPortugues = true;
-        const taskId = task.editUrl.match(/\/task\/edit\/(\d+)/)?.[1] ?? "";
-        let videoName = "";
-        let uploaderCode = "";
-
-        if (videoUrl.includes("player.vimeo.com")) {
-          videoName = "vídeo no vimeo";
-        } else {
-          uploaderCode = videoUrl.includes("/") ? videoUrl.split("/")[1] : videoUrl;
-          const info = await getVideoInfo(uploaderCode, checks);
-          videoName = info.videoName;
-          if (checks.pt)  hasPortugues = info.hasPortugues;
-          if (checks.esp) hasEspanhol  = info.hasEspanhol;
+    const sectionWorker = async () => {
+      while (true) {
+        const idx = sectionCursor++;
+        if (idx >= activeSections.length) return;
+        const section = activeSections[idx];
+        try {
+          const r = await getAdminSectionTasks(courseId, section.id);
+          sectionTaskLists[idx] = { section, tasks: r.tasks || [] };
+        } catch (_) {
+          sectionTaskLists[idx] = { section, tasks: [] };
         }
+      }
+    };
 
-        const failed = (checks.transcription && !hasTranscription)
-          || (checks.esp && !hasEspanhol)
-          || (checks.pt && !hasPortugues);
+    await Promise.all(
+      Array.from({ length: Math.min(SECTION_CONCURRENCY, activeSections.length) }, sectionWorker)
+    );
 
-        results.push({
-          taskId, sectionTitle: section.title, title: task.title,
-          videoName, uploaderCode,
-          hasTranscription, hasEspanhol, hasPortugues,
-          checks, failed
-        });
+    const queue = [];
+    for (const entry of sectionTaskLists) {
+      if (!entry) continue;
+      for (const task of entry.tasks) {
+        if (task.type !== "Vídeo") continue;
+        queue.push({ section: entry.section, task });
       }
     }
 
-    return results;
+    // Pool de workers — processa N vídeos em paralelo, preservando ordem
+    const CONCURRENCY = 4;
+    const results = new Array(queue.length);
+    let cursor = 0;
+
+    const processOne = async ({ section, task }) => {
+      const { videoUrl, transcriptionText } = await getAdminTaskContent(task.editUrl);
+      const hasUrl = videoUrl && videoUrl.trim() !== "0" && videoUrl.trim() !== "";
+      if (!hasUrl) return null;
+
+      const hasTranscription = (transcriptionText || "").replace(/\s+/g, "").length > 50;
+
+      let hasEspanhol = true, hasPortugues = true, legendaSolicitada = false;
+      const taskId = task.editUrl.match(/\/task\/edit\/(\d+)/)?.[1] ?? "";
+      let videoName = "";
+      let uploaderCode = "";
+
+      if (videoUrl.includes("player.vimeo.com")) {
+        videoName = "vídeo no vimeo";
+      } else {
+        uploaderCode = videoUrl.includes("/") ? videoUrl.split("/")[1] : videoUrl;
+        const info = await getVideoInfo(uploaderCode, checks, {
+          courseId,
+          courseName,
+          taskId,
+          taskTitle: task.title,
+          sectionTitle: section.title,
+          source: "batch_audit",
+        });
+        videoName = info.videoName;
+        if (checks.pt)  hasPortugues = info.hasPortugues;
+        if (checks.esp) hasEspanhol  = info.hasEspanhol;
+        legendaSolicitada = info.legendaSolicitada;
+      }
+
+      const failed = (checks.transcription && !hasTranscription)
+        || (checks.esp && !hasEspanhol)
+        || (checks.pt && !hasPortugues);
+
+      return {
+        taskId, sectionTitle: section.title, title: task.title,
+        videoName, uploaderCode,
+        hasTranscription, hasEspanhol, hasPortugues, legendaSolicitada,
+        checks, failed
+      };
+    };
+
+    const worker = async () => {
+      while (true) {
+        const idx = cursor++;
+        if (idx >= queue.length) return;
+        try {
+          results[idx] = await processOne(queue[idx]);
+        } catch (_) {
+          // silencioso: falha em um vídeo não derruba o curso
+        }
+      }
+    };
+
+    await Promise.all(
+      Array.from({ length: Math.min(CONCURRENCY, queue.length) }, worker)
+    );
+
+    return results.filter(Boolean);
   }
 
   function htmlToText(html) {
@@ -2056,7 +2126,7 @@
     }
   }
 
-  async function runBatchTranscriptionAudit(courseIds, checks) {
+  async function runBatchTranscriptionAudit(courseIds, checks, courseNames = {}) {
     const { modal, overlay } = createOverlayModal("420px");
     const titleEl = document.createElement("h3");
     titleEl.style.cssText = "margin:0 0 14px;font-weight:700;font-size:16px;";
@@ -2074,7 +2144,7 @@
       progressEl.textContent = `Curso ${i + 1}/${courseIds.length} — ID: ${courseId}…`;
       if (checks.transcription || checks.pt || checks.esp) {
         try {
-          const results = await auditCourseTranscription(courseId, checks);
+          const results = await auditCourseTranscription(courseId, checks, courseNames?.[String(courseId)] || "");
           for (const r of results) allResults.push({ courseId, ...r });
         } catch (e) {
           allResults.push({ courseId, taskId: "", videoUrl: "", videoName: `Erro: ${e?.message || String(e)}` });
@@ -2119,6 +2189,17 @@
         : `Auditoria em lote: ${failedResults.length} vídeo(s) com pendências ⚠️`;
     }
     modal.appendChild(title);
+
+    // ---------- Banner: legendas solicitadas automaticamente ----------
+    const generationCount = allResults.filter(r => r.legendaSolicitada).length;
+    if (generationCount > 0) {
+      const genBanner = document.createElement("div");
+      genBanner.style.cssText = "padding:10px 14px;border-radius:8px;background:#fff4e5;border:1px solid #f57c00;margin-bottom:14px;font-size:13px;font-weight:600;color:#bf5b00;";
+      genBanner.textContent = generationCount === 1
+        ? "📝 1 legenda foi solicitada automaticamente"
+        : `📝 ${generationCount} legendas foram solicitadas automaticamente`;
+      modal.appendChild(genBanner);
+    }
 
     // ---------- Banner textual (modo combinado) ----------
     if (hasTextual && hasTranscriptionChecks) {
@@ -2235,7 +2316,18 @@
 
           const tdCode = document.createElement("td");
           tdCode.style.cssText = TD + "font-family:monospace;font-size:11px;color:#444;";
-          tdCode.textContent = item.uploaderCode || "vimeo";
+          if (item.legendaSolicitada) {
+            const codeSpan = document.createElement("span");
+            codeSpan.textContent = item.uploaderCode || "vimeo";
+            const reqSpan = document.createElement("span");
+            reqSpan.textContent = " 📝";
+            reqSpan.title = "Geração de legenda solicitada automaticamente";
+            reqSpan.style.cssText = "color:#f57c00;font-weight:600;";
+            tdCode.appendChild(codeSpan);
+            tdCode.appendChild(reqSpan);
+          } else {
+            tdCode.textContent = item.uploaderCode || "vimeo";
+          }
 
           tr.appendChild(tdSec);
           tr.appendChild(tdAula);
@@ -2262,6 +2354,7 @@
           if (c2.pt)            line += ` | PT: ${item.hasPortugues ? "OK" : "FALTA"}`;
           if (c2.esp)           line += ` | ESP: ${item.hasEspanhol ? "OK" : "FALTA"}`;
           if (c2.transcription) line += ` | Transcrição: ${item.hasTranscription ? "OK" : "FALTA"}`;
+          if (item.legendaSolicitada) line += ` | 📝 Geração solicitada`;
           reportText += line + "\n";
         });
 
@@ -2291,27 +2384,6 @@
     }
 
     if (!onlyTextual) {
-      // Botão: copiar códigos com legenda faltando
-      const missingCodes = allResults
-        .filter(r => r.uploaderCode && (
-          (checks.pt  && !r.hasPortugues) ||
-          (checks.esp && !r.hasEspanhol)
-        ))
-        .map(r => r.uploaderCode);
-
-      if (missingCodes.length > 0) {
-        const copyCodesBtn = document.createElement("button");
-        copyCodesBtn.style.cssText = "padding:9px 18px;border:0;border-radius:8px;cursor:pointer;background:#f57c00;color:#fff;font-size:13px;font-weight:600;font-family:inherit;";
-        copyCodesBtn.textContent = `Copiar ${missingCodes.length} código(s) sem legenda`;
-        copyCodesBtn.onclick = () => {
-          navigator.clipboard.writeText(missingCodes.join("\n")).then(() => {
-            copyCodesBtn.textContent = "Copiado!";
-            setTimeout(() => { copyCodesBtn.textContent = `Copiar ${missingCodes.length} código(s) sem legenda`; }, 1500);
-          });
-        };
-        btnRow.appendChild(copyCodesBtn);
-      }
-
       if (allResults.length > 0) {
         const copyBtn = document.createElement("button");
         copyBtn.style.cssText = "padding:9px 18px;border:1.5px solid #ddd;border-radius:8px;cursor:pointer;background:#fff;color:#1c1c1c;font-size:13px;font-weight:600;font-family:inherit;";
@@ -2383,11 +2455,109 @@
     return true;
   });
 
+  // Busca nomes dos cursos e mostra modal de confirmação antes de auditar.
+  async function confirmAndRunBatchTranscriptionAudit(courseIds, checks) {
+    const { modal, overlay } = createOverlayModal("480px");
+
+    const title = document.createElement("h3");
+    title.style.cssText = "margin:0 0 12px;font-weight:700;font-size:16px;color:#1c1c1c;";
+    title.textContent = "Confirmar cursos";
+    modal.appendChild(title);
+
+    const status = document.createElement("p");
+    status.style.cssText = "margin:0 0 12px;font-size:13px;color:#555;";
+    status.textContent = `Buscando nomes de ${courseIds.length} curso(s)…`;
+    modal.appendChild(status);
+
+    // Busca nomes em paralelo (pool de 2)
+    const NAME_CONCURRENCY = 2;
+    const names = new Array(courseIds.length);
+    let nameCursor = 0;
+    const nameWorker = async () => {
+      while (true) {
+        const idx = nameCursor++;
+        if (idx >= courseIds.length) return;
+        const id = courseIds[idx];
+        try {
+          const resp = await getCourseTextualInfo(id);
+          names[idx] = resp?.ok
+            ? { id, name: (resp.courseName || "").trim() || "(sem nome)", error: null }
+            : { id, name: null, error: resp?.error || "Erro desconhecido" };
+        } catch (e) {
+          names[idx] = { id, name: null, error: e?.message || String(e) };
+        }
+      }
+    };
+    await Promise.all(
+      Array.from({ length: Math.min(NAME_CONCURRENCY, courseIds.length) }, nameWorker)
+    );
+
+    status.remove();
+
+    const listLabel = document.createElement("p");
+    listLabel.style.cssText = "margin:0 0 8px;font-size:13px;color:#1c1c1c;font-weight:600;";
+    listLabel.textContent = "Confirma a auditoria e geração de legenda dos cursos abaixo?";
+    modal.appendChild(listLabel);
+
+    const list = document.createElement("ul");
+    list.style.cssText = "margin:0 0 16px;padding:0;list-style:none;max-height:300px;overflow-y:auto;border:1px solid #eee;border-radius:8px;";
+    for (const { id, name, error } of names) {
+      const li = document.createElement("li");
+      li.style.cssText = "padding:8px 12px;border-bottom:1px solid #f0f0f0;font-size:13px;display:flex;gap:10px;align-items:baseline;";
+      const idSpan = document.createElement("span");
+      idSpan.style.cssText = "font-family:monospace;color:#666;min-width:54px;flex-shrink:0;";
+      idSpan.textContent = id;
+      const nameSpan = document.createElement("span");
+      if (name) {
+        nameSpan.textContent = name;
+        nameSpan.style.cssText = "color:#1c1c1c;";
+      } else {
+        nameSpan.textContent = `⚠️ ${error || "Curso não encontrado"}`;
+        nameSpan.style.cssText = "color:#c62828;";
+      }
+      li.appendChild(idSpan);
+      li.appendChild(nameSpan);
+      list.appendChild(li);
+    }
+    modal.appendChild(list);
+
+    const validIds = names.filter(n => n.name).map(n => n.id);
+    const validCourseNames = {};
+    for (const item of names) {
+      if (item.name) validCourseNames[String(item.id)] = item.name;
+    }
+
+    const btnRow = document.createElement("div");
+    btnRow.style.cssText = "display:flex;gap:8px;justify-content:flex-end;";
+
+    const cancelBtn = document.createElement("button");
+    cancelBtn.style.cssText = "padding:9px 18px;border:1.5px solid #ddd;border-radius:8px;cursor:pointer;background:#fff;color:#1c1c1c;font-size:13px;font-weight:600;font-family:inherit;";
+    cancelBtn.textContent = "Cancelar";
+    cancelBtn.onclick = () => overlay.remove();
+    btnRow.appendChild(cancelBtn);
+
+    const confirmBtn = document.createElement("button");
+    const enabled = validIds.length > 0;
+    confirmBtn.style.cssText = `padding:9px 18px;border:0;border-radius:8px;cursor:${enabled ? "pointer" : "not-allowed"};background:#1565c0;color:#fff;font-size:13px;font-weight:600;font-family:inherit;opacity:${enabled ? "1" : "0.5"};`;
+    confirmBtn.textContent = enabled ? `Auditar ${validIds.length} curso(s)` : "Nenhum curso válido";
+    confirmBtn.disabled = !enabled;
+    confirmBtn.onclick = () => {
+      overlay.remove();
+      runBatchTranscriptionAudit(validIds, checks, validCourseNames);
+    };
+    btnRow.appendChild(confirmBtn);
+
+    modal.appendChild(btnRow);
+  }
+
   // ---------- Batch transcription audit via popup ----------
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     if (msg?.type !== "ALURA_REVISOR_BATCH_TRANSCRIPTION_AUDIT") return;
     sendResponse({ ok: true });
-    runBatchTranscriptionAudit(msg.courseIds || [], msg.checks || { transcription: true, pt: true, esp: true });
+    confirmAndRunBatchTranscriptionAudit(
+      msg.courseIds || [],
+      msg.checks || { transcription: true, pt: true, esp: true }
+    );
     return true;
   });
 
