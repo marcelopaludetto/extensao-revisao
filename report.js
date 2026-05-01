@@ -8,6 +8,7 @@
     R2_MATERIAL_UPLOAD: "r2_material_upload",
     ASSESSMENT_PUBLISHED: "assessment_published",
     ACTIVITY_PUBLISHED: "activity_published",
+    ACTIVITY_DEACTIVATED: "activity_deactivated",
     EXERCISE_CREATED: "exercise_created",
     CHALLENGE_PUBLISHED: "challenge_published",
     UNIT_REVIEW_COMPLETED: "unit_review_completed",

@@ -442,7 +442,7 @@ deactConfirmBtn?.addEventListener("click", async () => {
   if (!confirm(`Desativar ${selected.length} atividade(s)?`)) return;
 
   deactConfirmBtn.disabled = true;
-  let done = 0;
+  let done = 0, succeeded = 0;
   const tab = await getActiveTab();
 
   for (const cb of selected) {
@@ -453,12 +453,20 @@ deactConfirmBtn?.addEventListener("click", async () => {
         editUrl: cb.dataset.editUrl,
       });
       if (resp?.ok) {
+        succeeded++;
         cb.disabled = true;
         cb.checked = false;
         cb.closest(".deact-task-item")?.classList.add("inactive");
       }
     } catch { /* continua */ }
     done++;
+  }
+
+  if (succeeded > 0) {
+    await logFeatureUsage("activity_deactivated", "deactivated", {
+      count: succeeded,
+      metadata: { total: selected.length, succeeded, failed: done - succeeded },
+    });
   }
 
   deactStatusEl.textContent = `✅ ${done} atividade(s) desativada(s).`;
@@ -714,6 +722,10 @@ async function deleteSupportMaterial(courseId, sectionId, materialId, itemEl) {
     itemEl.style.opacity = "0.4";
     itemEl.style.pointerEvents = "none";
     itemEl.querySelector(".mat-del-btn").textContent = "Deletado";
+    await logFeatureUsage("r2_material_upload", "material_deleted", {
+      courseId,
+      metadata: { sectionId, materialId },
+    });
   } catch (e) {
     const errEl = itemEl.querySelector(".mat-del-err");
     if (errEl) {
@@ -980,6 +992,10 @@ async function publishEditorialItem(idx) {
     await publishMaterialsForSection(courseId, sectionId, [{ ...cls, link }]);
     item.pubStatus = "done";
     logPublish(`✓ Aula ${aula}: "${cls.title}" publicado.`);
+    await logFeatureUsage("activity_published", "editorial_material_published", {
+      courseId,
+      metadata: { fileName: item.name, subfolder: item.subfolder, aula, title: cls.title, role: cls.role },
+    });
   } catch (e) {
     item.pubStatus = "error";
     item.pubError = e.message || String(e);
@@ -1341,6 +1357,13 @@ if (editPublishBtn) {
     await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 
     logPublish(`\nConcluído: ${okCount} aula(s) OK, ${skipCount} material(is) ignorado(s) por duplicata, ${failCount} com erro.`);
+    if (okCount > 0) {
+      await logFeatureUsage("activity_published", "batch_editorial_published", {
+        courseId,
+        count: okCount,
+        metadata: { okCount, skipCount, failCount },
+      });
+    }
     editPublishBtn.disabled = false;
   });
 }
@@ -2145,6 +2168,10 @@ async function uploadImgItem(idx) {
     await uploadToR2(item.file, key, r2AccessKey, r2SecretKey);
     item.status = "done";
     item.url = buildImgUrl(imgCourseId, item.name);
+    await logFeatureUsage("r2_material_upload", "image_uploaded", {
+      courseId: imgCourseId,
+      metadata: { fileName: item.name, objectKey: key, size: item.file?.size || 0 },
+    });
   } catch (e) {
     item.status = "error";
     item.error = e.message || String(e);
