@@ -1287,7 +1287,7 @@
 
       // Validação de ordem (via DOM para suportar botão com evento)
       if (platform) {
-        const orderErrors = validateSectionOrder(tasks, platform, { sectionIndex, totalSections });
+        const orderErrors = validateSectionOrder(tasks, platform, { sectionIndex, totalSections, sectionTitle: section.title });
         const orderDiv = document.createElement("div");
         orderDiv.style.marginTop = "12px";
 
@@ -1307,7 +1307,7 @@
             fixBtn.disabled = true;
             fixBtn.textContent = "Ajustando…";
             try {
-              const correctTasks = computeCorrectOrder(tasks, platform, { sectionIndex, totalSections });
+              const correctTasks = computeCorrectOrder(tasks, platform, { sectionIndex, totalSections, sectionTitle: section.title });
               const orderedIds = correctTasks
                 .map(t => t.editUrl?.match(/\/task\/edit\/(\d+)/)?.[1])
                 .filter(Boolean);
@@ -1517,6 +1517,10 @@
     figma: "Figma / p5.js / Python / IA / Cultura digital / Educação Midiática",
     robotica: "Robótica",
     tecnico: "Curso técnico",
+    "formacao-ai-12": "Forma\u00e7\u00e3o docente - Anos iniciais (1\u00ba e 2\u00ba ano)",
+    "formacao-ai-35": "Forma\u00e7\u00e3o docente - Anos iniciais (3\u00ba a 5\u00ba ano)",
+    "formacao-af-startlab": "Forma\u00e7\u00e3o docente - Anos finais (unidade com StartLab)",
+    "formacao-af-em": "Forma\u00e7\u00e3o docente - Anos finais e m\u00e9dio",
   };
 
   const ORDER_TEMPLATES = {
@@ -1556,10 +1560,79 @@
     ],
   };
 
+  const FORMACAO_DOCENTE_PLATFORMS = new Set([
+    "formacao-ai-12",
+    "formacao-ai-35",
+    "formacao-af-startlab",
+    "formacao-af-em",
+  ]);
+
+  function normalizeComparableText(s) {
+    return normalizeText(s)
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function getFormacaoDocenteTemplate(platform, context = {}) {
+    const sectionTitle = normalizeComparableText(context.sectionTitle || "");
+    const sectionIndex = Number.isInteger(context.sectionIndex) ? context.sectionIndex : -1;
+    const totalSections = Number.isInteger(context.totalSections) ? context.totalSections : 0;
+    const isLast = totalSections > 0 && sectionIndex === totalSections - 1;
+
+    if (platform === "formacao-ai-12") {
+      if (sectionTitle.includes("aspectos gerais") || sectionIndex === 0) {
+        return ["contextualizacao", "conteudoProgramatico", "resumoAulaAula", "conexaoInterdisciplinar", "rubrica"];
+      }
+      if (sectionTitle.includes("aulas 1") || sectionIndex === 1) {
+        return ["aulas12", "planoDeAula", "diarioDeBordo", "atividadesParaImprimir"];
+      }
+      return ["orientacoes", "planoDeAula", "diarioDeBordo", "atividadesParaImprimir"];
+    }
+
+    if (platform === "formacao-ai-35") {
+      if (sectionTitle.includes("modulo 1") || sectionIndex === 0) {
+        return [
+          "contextualizacao", "conteudoProgramatico", "estrategiasDidaticas", "resumoAulaAula",
+          "conexaoInterdisciplinar", "avaliacaoAprendizagem", "orientacoesDidaticasAula",
+          "planoDeAula", "diarioDeBordo", "rubrica",
+        ];
+      }
+      if (sectionTitle.includes("modulo 4") || isLast) {
+        return ["orientacoesDidaticasAula", "planoDeAula", "diarioDeBordo", "rubrica", "sistematizacao"];
+      }
+      return [
+        "orientacoesDidaticasAula", "planoDeAula", "diarioDeBordo", "rubrica",
+        "orientacoesDidaticasAula", "planoDeAula", "diarioDeBordo", "rubrica",
+      ];
+    }
+
+    if (platform === "formacao-af-startlab") {
+      if (sectionTitle.includes("orientacoes") || sectionIndex === 0) {
+        return ["contextualizacao", "aulas1a4", "aulas5a8", "sistematizacao"];
+      }
+      if (sectionTitle.includes("recursos") || sectionIndex === 1) {
+        return ["startlab", "gabaritoAvaliacao", "rubrica", "materialProfessor"];
+      }
+      return ["aulaProjeto"];
+    }
+
+    if (platform === "formacao-af-em") {
+      if (sectionTitle.includes("orientacoes") || sectionIndex === 0) {
+        return ["contextualizacao", "aulas1a4", "aulas5a8", "sistematizacao"];
+      }
+      return ["projetoInstrutor", "gabaritoAvaliacao", "rubrica", "materialProfessor"];
+    }
+
+    return null;
+  }
+
   const EXERCISE_TYPES = /única escolha|múltipla escolha|ordenar blocos|arrastar e soltar|verdadeiro ou falso|preencha os campos|sem resposta do aluno/i;
 
   function getOrderTemplate(platform, context = {}) {
-    if (!platform || !ORDER_TEMPLATES[platform]) return null;
+    if (!platform) return null;
+    if (FORMACAO_DOCENTE_PLATFORMS.has(platform)) return getFormacaoDocenteTemplate(platform, context);
+    if (!ORDER_TEMPLATES[platform]) return null;
     if (platform !== "tecnico") return ORDER_TEMPLATES[platform];
 
     const hasSectionContext = Number.isInteger(context.sectionIndex) && Number.isInteger(context.totalSections);
@@ -1578,7 +1651,29 @@
 
   function classifyTask(task) {
     const title = normalizeText(task.title || "").toLowerCase();
+    const plain = normalizeComparableText(task.title || "");
     const type  = task.type || "";
+    if (plain.includes("contextualizacao")) return "contextualizacao";
+    if (plain.includes("conteudo programatico")) return "conteudoProgramatico";
+    if (plain.includes("estrategias didaticas")) return "estrategiasDidaticas";
+    if (plain.includes("resumo") && plain.includes("aula")) return "resumoAulaAula";
+    if (plain.includes("conexao interdisciplinar")) return "conexaoInterdisciplinar";
+    if (plain.includes("avaliacao de aprendizagem")) return "avaliacaoAprendizagem";
+    if (plain.includes("orientacoes didaticas") && plain.includes("aula")) return "orientacoesDidaticasAula";
+    if (plain === "orientacoes" || plain.includes("orientacoes")) return "orientacoes";
+    if (plain.includes("plano de aula") || plain.includes("planos de aula")) return "planoDeAula";
+    if (plain.includes("diario de bordo") || plain.includes("diarios de bordo")) return "diarioDeBordo";
+    if (plain.includes("atividades para imprimir")) return "atividadesParaImprimir";
+    if (plain.includes("aulas 1 e 2")) return "aulas12";
+    if (/aulas?\s*1\s*a\s*4/.test(plain)) return "aulas1a4";
+    if (/aulas?\s*5\s*a\s*8/.test(plain)) return "aulas5a8";
+    if (plain.includes("sistematizacao")) return "sistematizacao";
+    if (plain.includes("gabarito") && plain.includes("avaliacao")) return "gabaritoAvaliacao";
+    if (plain.includes("material do professor")) return "materialProfessor";
+    if (plain.includes("projeto do instrutor") || plain.includes("projetos do instrutor")) return "projetoInstrutor";
+    if (plain === "startlab") return "startlab";
+    if (/^aula\s+\d+/.test(plain) || plain === "aula x") return "aulaProjeto";
+    if (plain.includes("rubrica")) return "rubrica";
     if (title.includes("o que vamos aprender"))  return "oQueVamosAprender";
     const isPreparandoAmbiente = title.includes("preparando o ambiente") || title.includes("preparando ambiente");
     if (isPreparandoAmbiente && title.includes("lista de materiais")) return "listaMateriais";
@@ -1776,7 +1871,7 @@
 
     // ---- Validação de ordem das atividades ----
     if (state.platform) {
-      const orderErrors = validateSectionOrder(tasks, state.platform, { sectionIndex: si, totalSections });
+      const orderErrors = validateSectionOrder(tasks, state.platform, { sectionIndex: si, totalSections, sectionTitle: section.title });
       if (orderErrors.length > 0) {
         state.issues.orderIssues = state.issues.orderIssues || [];
         state.issues.orderIssues.push({ section: section.title, errors: orderErrors });
@@ -1941,8 +2036,8 @@
     console.log("[Revisor] forumBlocked:", forumBlocked);
 
     const theme = adminFields ? adminFields.theme : null;
-    const expectedTheme = productType === "efai" ? "START_EFAI" : "START_EM";
-    const themeOk = theme === null ? null : theme === expectedTheme;
+    const expectedTheme = productType === "formacaoDocente" ? null : productType === "efai" ? "START_EFAI" : "START_EM";
+    const themeOk = expectedTheme ? (theme === null ? null : theme === expectedTheme) : undefined;
     console.log("[Revisor] theme:", theme, "expected:", expectedTheme, "ok:", themeOk);
     console.log("[Revisor] sub127:", subResults.sub127, "sub26:", subResults.sub26);
 

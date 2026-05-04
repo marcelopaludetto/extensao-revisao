@@ -1,6 +1,32 @@
 const KEY = "aluraRevisorRunState";
 const KEY_HISTORY = "aluraRevisorHistory";
 
+const FORMACAO_DOCENTE_PLATFORMS = [
+  "formacao-ai-12",
+  "formacao-ai-35",
+  "formacao-af-startlab",
+  "formacao-af-em",
+];
+
+const PLATFORM_OPTIONS = {
+  default: [
+    { value: "", label: "Selecione a plataforma..." },
+    { value: "startlab", label: "StartLab" },
+    { value: "vscode", label: "VS Code" },
+    { value: "figma", label: "Figma / p5.js / Python / IA / Cultura digital / Educa\u00e7\u00e3o Midi\u00e1tica" },
+    { value: "robotica", label: "Rob\u00f3tica" },
+  ],
+  tecnico: [
+    { value: "tecnico", label: "Curso t\u00e9cnico" },
+  ],
+  formacaoDocente: [
+    { value: "formacao-ai-12", label: "Anos iniciais (1\u00ba e 2\u00ba ano)" },
+    { value: "formacao-ai-35", label: "Anos iniciais (3\u00ba a 5\u00ba ano)" },
+    { value: "formacao-af-startlab", label: "Anos finais (unidade com StartLab)" },
+    { value: "formacao-af-em", label: "Anos finais e m\u00e9dio" },
+  ],
+};
+
 function logFeatureUsage(feature, action, data = {}) {
   const { courseId = "", courseName = "", count = 1, metadata = {} } = data;
   return new Promise(resolve => {
@@ -98,6 +124,76 @@ const ACTIVITY_ORDERS = {
     { label: "Exerc\u00edcio Luri" },
     { label: "Conclus\u00e3o", note: "apenas na \u00faltima aula", optional: true },
   ],
+  "formacao-ai-12": [
+    { heading: "1. Aspectos Gerais da Unidade" },
+    { marker: "a", label: "Contextualiza\u00e7\u00e3o", subitem: true },
+    { marker: "b", label: "Conte\u00fado Program\u00e1tico", subitem: true },
+    { marker: "c", label: "Resumo aula a aula", subitem: true },
+    { marker: "d", label: "Conex\u00e3o interdisciplinar", subitem: true },
+    { marker: "e", label: "Rubrica", subitem: true },
+    { heading: "2. Orienta\u00e7\u00f5es Did\u00e1ticas - Aulas 1 e 2" },
+    { marker: "a", label: "Aulas 1 e 2", subitem: true },
+    { marker: "b", label: "Planos de Aula", subitem: true },
+    { marker: "c", label: "Di\u00e1rios de Bordo", subitem: true },
+    { marker: "d", label: "Atividades para imprimir", subitem: true },
+    { heading: "3. Orienta\u00e7\u00f5es Did\u00e1ticas - Aulas 3 e 4" },
+    { marker: "a", label: "Orienta\u00e7\u00f5es", subitem: true },
+    { marker: "b", label: "Planos de Aula", subitem: true },
+    { marker: "c", label: "Di\u00e1rios de Bordo", subitem: true },
+    { marker: "d", label: "Atividades para imprimir", subitem: true },
+  ],
+  "formacao-ai-35": [
+    { heading: "1. M\u00f3dulo 1" },
+    { marker: "a", label: "Contextualiza\u00e7\u00e3o da unidade", subitem: true },
+    { marker: "b", label: "Conte\u00fado program\u00e1tico", subitem: true },
+    { marker: "c", label: "Estrat\u00e9gias did\u00e1ticas", subitem: true },
+    { marker: "d", label: "Resumo - Aula a aula", subitem: true },
+    { marker: "e", label: "Conex\u00e3o interdisciplinar", subitem: true },
+    { marker: "f", label: "Avalia\u00e7\u00e3o de aprendizagem", subitem: true },
+    { marker: "g", label: "Orienta\u00e7\u00f5es did\u00e1ticas: aula 1", subitem: true },
+    { marker: "h", label: "Plano de aula", subitem: true },
+    { marker: "i", label: "Di\u00e1rio de bordo", subitem: true },
+    { marker: "j", label: "Rubrica", subitem: true },
+    { heading: "2. M\u00f3dulo 2 e M\u00f3dulo 3" },
+    { marker: "a", label: "Orienta\u00e7\u00f5es did\u00e1ticas: aula X", subitem: true },
+    { marker: "b", label: "Plano de aula", subitem: true },
+    { marker: "c", label: "Di\u00e1rio de bordo", subitem: true },
+    { marker: "d", label: "Rubrica", subitem: true },
+    { heading: "3. M\u00f3dulo 4" },
+    { marker: "a", label: "Orienta\u00e7\u00f5es did\u00e1ticas: aula 4", subitem: true },
+    { marker: "b", label: "Plano de aula", subitem: true },
+    { marker: "c", label: "Di\u00e1rio de bordo", subitem: true },
+    { marker: "d", label: "Rubrica", subitem: true },
+    { marker: "e", label: "Sistematiza\u00e7\u00e3o da unidade", subitem: true },
+  ],
+  "formacao-af-startlab": [
+    { heading: "1. Orienta\u00e7\u00f5es Did\u00e1ticas" },
+    { marker: "a", label: "Contextualiza\u00e7\u00e3o", subitem: true },
+    { marker: "b", label: "Aulas 1 a 4", subitem: true },
+    { marker: "c", label: "Aulas 5 a 8", subitem: true },
+    { marker: "d", label: "Sistematiza\u00e7\u00e3o", subitem: true },
+    { heading: "2. Recursos Did\u00e1ticos" },
+    { marker: "a", label: "StartLab", subitem: true },
+    { marker: "b", label: "Gabarito da Avalia\u00e7\u00e3o", subitem: true },
+    { marker: "c", label: "Rubrica", subitem: true },
+    { marker: "d", label: "Material do Professor", subitem: true },
+    { heading: "3. Projetos do Instrutor" },
+    { marker: "a", label: "Aula 1", subitem: true },
+    { marker: "b", label: "Aula 2 ...", subitem: true },
+    { marker: "c", label: "Aula X", subitem: true },
+  ],
+  "formacao-af-em": [
+    { heading: "1. Orienta\u00e7\u00f5es Did\u00e1ticas" },
+    { marker: "a", label: "Contextualiza\u00e7\u00e3o", subitem: true },
+    { marker: "b", label: "Aulas 1 a 4", subitem: true },
+    { marker: "c", label: "Aulas 5 a 8", subitem: true },
+    { marker: "d", label: "Sistematiza\u00e7\u00e3o", subitem: true },
+    { heading: "2. Recursos Did\u00e1ticos" },
+    { marker: "a", label: "Projeto do Instrutor", note: "nem sempre tem", optional: true, subitem: true },
+    { marker: "b", label: "Gabarito da Avalia\u00e7\u00e3o", subitem: true },
+    { marker: "c", label: "Rubrica", subitem: true },
+    { marker: "d", label: "Material do Professor", subitem: true },
+  ],
 };
 
 function renderActivityChecklist(platform) {
@@ -111,16 +207,25 @@ function renderActivityChecklist(platform) {
 
   const items = ACTIVITY_ORDERS[platform];
   const fragment = document.createDocumentFragment();
-  const isFixedOrder = platform === "tecnico";
+  const isFixedOrder = platform === "tecnico" || FORMACAO_DOCENTE_PLATFORMS.includes(platform);
+  let stepNumber = 1;
 
   items.forEach((item, i) => {
+    if (item.heading) {
+      const heading = document.createElement("div");
+      heading.className = "act-heading";
+      heading.textContent = item.heading;
+      fragment.appendChild(heading);
+      return;
+    }
+
     const div = document.createElement("div");
-    div.className = "act-item" + (item.optional ? " optional" : "") + (isFixedOrder ? " fixed" : "");
+    div.className = "act-item" + (item.optional ? " optional" : "") + (isFixedOrder ? " fixed" : "") + (item.subitem ? " subitem" : "");
 
     if (isFixedOrder) {
       const step = document.createElement("span");
       step.className = "act-step";
-      step.textContent = String(i + 1);
+      step.textContent = item.marker || String(stepNumber++);
       div.appendChild(step);
     } else {
       const cb = document.createElement("input");
@@ -154,9 +259,23 @@ function renderActivityChecklist(platform) {
 const platformSelect = document.getElementById("platform-select");
 if (platformSelect) {
   platformSelect.addEventListener("change", () => {
-    platformSelect.dataset.autoTecnico = "0";
     renderActivityChecklist(platformSelect.value);
   });
+}
+
+function fillPlatformOptions(options, selectedValue = "") {
+  if (!platformSelect) return;
+
+  platformSelect.innerHTML = "";
+  options.forEach((option) => {
+    const el = document.createElement("option");
+    el.value = option.value;
+    el.textContent = option.label;
+    platformSelect.appendChild(el);
+  });
+
+  const values = options.map(option => option.value);
+  platformSelect.value = values.includes(selectedValue) ? selectedValue : options[0]?.value || "";
 }
 
 function syncPlatformWithProductType() {
@@ -164,15 +283,14 @@ function syncPlatformWithProductType() {
 
   const productType = document.querySelector('input[name="productType"]:checked')?.value || "tecnico";
   if (productType === "tecnico") {
-    platformSelect.value = "tecnico";
+    fillPlatformOptions(PLATFORM_OPTIONS.tecnico, "tecnico");
     platformSelect.disabled = true;
-    platformSelect.dataset.autoTecnico = "1";
-  } else {
+  } else if (productType === "formacaoDocente") {
+    fillPlatformOptions(PLATFORM_OPTIONS.formacaoDocente, platformSelect.value);
     platformSelect.disabled = false;
-    if (platformSelect.dataset.autoTecnico === "1") {
-      platformSelect.value = "";
-    }
-    platformSelect.dataset.autoTecnico = "0";
+  } else {
+    fillPlatformOptions(PLATFORM_OPTIONS.default, platformSelect.value);
+    platformSelect.disabled = false;
   }
 
   renderActivityChecklist(platformSelect.value);

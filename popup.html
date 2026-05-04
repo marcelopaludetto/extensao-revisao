@@ -355,6 +355,26 @@
       padding: 3px 0;
     }
 
+    .act-heading {
+      margin-top: 8px;
+      padding-top: 6px;
+      border-top: 1px solid #d0d7de;
+      font-size: 12px;
+      font-weight: 700;
+      color: #0d1117;
+      line-height: 1.35;
+    }
+
+    .act-heading:first-child {
+      margin-top: 0;
+      padding-top: 0;
+      border-top: 0;
+    }
+
+    .act-item.subitem {
+      padding-left: 10px;
+    }
+
     .act-item input[type="checkbox"] {
       margin-top: 2px;
       flex-shrink: 0;
@@ -825,6 +845,8 @@
             name="productType" value="em"> EM</label>
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
             name="productType" value="efai"> EFAI</label>
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;cursor:pointer;"><input type="radio"
+            name="productType" value="formacaoDocente"> Formação docente</label>
       </div>
       <div class="section-label" style="margin-top:0; margin-bottom:6px;">Ordem das atividades</div>
       <select id="platform-select">
