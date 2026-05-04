@@ -331,6 +331,12 @@
       box-shadow: 0 0 0 2px rgba(80,222,255,0.18);
     }
 
+    #platform-select:disabled {
+      background: #e6edf3;
+      color: #57606a;
+      cursor: default;
+    }
+
     #activity-checklist {
       display: flex;
       flex-direction: column;
@@ -358,9 +364,26 @@
       accent-color: #50DEFF;
     }
 
+    .act-step {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: #e6edf3;
+      color: #0d1117;
+      font-size: 10px;
+      font-weight: 700;
+      line-height: 18px;
+      text-align: center;
+    }
+
     .act-item label {
       cursor: pointer;
       color: #0d1117;
+    }
+
+    .act-item.fixed label {
+      cursor: default;
     }
 
     .act-item label .act-note {

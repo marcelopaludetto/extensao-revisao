@@ -771,6 +771,25 @@
       lines.push("");
     }
 
+    const tecnicoRules = state.issues?.tecnicoRules || [];
+    if (tecnicoRules.length > 0) {
+      hasAnyIssue = true;
+      lines.push("Regras do Curso T\u00e9cnico:");
+      tecnicoRules.forEach(m => lines.push(`  - ${m}`));
+      lines.push("");
+    }
+
+    const orderIssues = state.issues?.orderIssues || [];
+    if (orderIssues.length > 0) {
+      hasAnyIssue = true;
+      lines.push("Ordem das atividades:");
+      orderIssues.forEach((entry) => {
+        lines.push(`  Aula: ${entry.section}`);
+        (entry.errors || []).forEach(m => lines.push(`    - ${m}`));
+      });
+      lines.push("");
+    }
+
     const reorderedSections = state.issues?.reorderedSections || [];
     if (reorderedSections.length > 0) {
       lines.push("✅ Ordem ajustado, tinha atividades inativas fora de ordem.");
@@ -843,8 +862,10 @@
 
     const tecnicoRules = state.issues?.tecnicoRules || [];
     const hasTecnicoRules = tecnicoRules.length > 0;
+    const orderIssues = state.issues?.orderIssues || [];
+    const hasOrderIssues = orderIssues.length > 0;
 
-    const hasContentIssues = hasEmptyHrefIssues || hasGithubIssues || hasCloudIssues || has404Issues || hasAdminIssues || hasGenericSectionNames || hasTecnicoRules;
+    const hasContentIssues = hasEmptyHrefIssues || hasGithubIssues || hasCloudIssues || has404Issues || hasAdminIssues || hasGenericSectionNames || hasTecnicoRules || hasOrderIssues;
 
     const iconLine = state.iconStatus === "exists"   ? "✅ Ícone OK"
       : state.iconStatus === "uploaded" ? "✅ Ícone enviado"
@@ -1007,6 +1028,24 @@
       ? `<div style="margin-top:14px; padding:12px; border-radius:8px; background:#f0fff5; border:1px solid #00c86f; font-weight:700; color:#007a42;">✅ Ordem ajustado, tinha atividades inativas fora de ordem.</div>`
       : "";
 
+    const orderIssuesBlock = hasOrderIssues
+      ? `
+        <div style="margin-top:14px; padding:12px; border-radius:8px; background:#fff3e0; border:1px solid #e65100;">
+          <div style="font-weight:700; margin-bottom:6px; color:#bf360c;">\u26a0\ufe0f Ordem das atividades:</div>
+          <ul style="margin:6px 0 0 18px; padding:0; color:#333;">
+            ${orderIssues.map(entry => `
+              <li style="margin-bottom:8px;">
+                <strong>${entry.section}</strong>
+                <ul style="margin:4px 0 0 18px; padding:0;">
+                  ${(entry.errors || []).map(m => `<li>${m}</li>`).join("")}
+                </ul>
+              </li>
+            `).join("")}
+          </ul>
+        </div>
+      `
+      : "";
+
     const tecnicoRulesBlock = hasTecnicoRules
       ? `
         <div style="margin-top:14px; padding:12px; border-radius:8px; background:#fff3e0; border:1px solid #e65100;">
@@ -1045,6 +1084,7 @@
         ${link404Block}
         ${adminFieldsBlock}
         ${genericSectionNamesBlock}
+        ${orderIssuesBlock}
         ${tecnicoRulesBlock}
         ${reorderedBlock}
         ${errorBlock}
@@ -1247,7 +1287,7 @@
 
       // Validação de ordem (via DOM para suportar botão com evento)
       if (platform) {
-        const orderErrors = validateSectionOrder(tasks, platform);
+        const orderErrors = validateSectionOrder(tasks, platform, { sectionIndex, totalSections });
         const orderDiv = document.createElement("div");
         orderDiv.style.marginTop = "12px";
 
@@ -1267,7 +1307,7 @@
             fixBtn.disabled = true;
             fixBtn.textContent = "Ajustando…";
             try {
-              const correctTasks = computeCorrectOrder(tasks, platform);
+              const correctTasks = computeCorrectOrder(tasks, platform, { sectionIndex, totalSections });
               const orderedIds = correctTasks
                 .map(t => t.editUrl?.match(/\/task\/edit\/(\d+)/)?.[1])
                 .filter(Boolean);
@@ -1306,6 +1346,26 @@
         }
 
         content.appendChild(orderDiv);
+      }
+
+      if (platform === "tecnico") {
+        const tecnicoErrors = validateTecnicoSectionRules(tasks, { sectionIndex, totalSections }, luriMap);
+        const tecnicoDiv = document.createElement("div");
+        tecnicoDiv.style.marginTop = "12px";
+
+        if (tecnicoErrors.length > 0) {
+          tecnicoDiv.innerHTML = `
+            <div style="padding:10px 12px; border-radius:8px; background:#fff3e0; border:1px solid #e65100;">
+              <div style="font-weight:700; font-size:13px; color:#bf360c; margin-bottom:6px;">\u26a0\ufe0f Regras do Curso T\u00e9cnico:</div>
+              <ul style="margin:0 0 0 16px; padding:0; font-size:13px; color:#333;">
+                ${tecnicoErrors.map(e => `<li>${e}</li>`).join("")}
+              </ul>
+            </div>`;
+        } else {
+          tecnicoDiv.innerHTML = `<div style="padding:8px 12px; border-radius:8px; background:#f0fff5; border:1px solid #00c86f; font-size:13px; font-weight:600; color:#007a42;">\u2705 Regras do Curso T\u00e9cnico OK</div>`;
+        }
+
+        content.appendChild(tecnicoDiv);
       }
 
       // Botão próxima aula
@@ -1489,7 +1549,7 @@
       "glossario", "oQueAprendemos", "conclusao",
     ],
     tecnico: [
-      "oQueVamosAprender", "preparandoAmbiente",
+      "oQueAprendemos", "preparandoAmbiente",
       "video", "aprofundamento",
       "exercicio", "exercicio",
       "conclusao",
@@ -1498,12 +1558,31 @@
 
   const EXERCISE_TYPES = /única escolha|múltipla escolha|ordenar blocos|arrastar e soltar|verdadeiro ou falso|preencha os campos|sem resposta do aluno/i;
 
+  function getOrderTemplate(platform, context = {}) {
+    if (!platform || !ORDER_TEMPLATES[platform]) return null;
+    if (platform !== "tecnico") return ORDER_TEMPLATES[platform];
+
+    const hasSectionContext = Number.isInteger(context.sectionIndex) && Number.isInteger(context.totalSections);
+    if (!hasSectionContext) return ORDER_TEMPLATES.tecnico;
+
+    const isFirst = context.sectionIndex === 0;
+    const isLast = context.totalSections > 0 && context.sectionIndex === context.totalSections - 1;
+    const template = [];
+
+    if (isFirst) template.push("oQueAprendemos");
+    template.push("preparandoAmbiente", "video", "aprofundamento", "exercicio", "exercicio");
+    if (isLast) template.push("conclusao");
+
+    return template;
+  }
+
   function classifyTask(task) {
     const title = normalizeText(task.title || "").toLowerCase();
     const type  = task.type || "";
     if (title.includes("o que vamos aprender"))  return "oQueVamosAprender";
-    if (title.includes("preparando o ambiente") && title.includes("lista de materiais")) return "listaMateriais";
-    if (title.includes("preparando o ambiente")) return "preparandoAmbiente";
+    const isPreparandoAmbiente = title.includes("preparando o ambiente") || title.includes("preparando ambiente");
+    if (isPreparandoAmbiente && title.includes("lista de materiais")) return "listaMateriais";
+    if (isPreparandoAmbiente) return "preparandoAmbiente";
     if (title.includes("projeto startlab"))      return "projetoStartlab";
     if (title.includes("faça como eu fiz"))      return "facaComoEuFiz";
     if (title.includes("para saber mais"))       return "paraSaberMais";
@@ -1519,9 +1598,9 @@
     return null;
   }
 
-  function computeCorrectOrder(tasks, platform) {
-    if (!platform || !ORDER_TEMPLATES[platform]) return tasks;
-    const template = ORDER_TEMPLATES[platform];
+  function computeCorrectOrder(tasks, platform, context = {}) {
+    const template = getOrderTemplate(platform, context);
+    if (!template) return tasks;
     const classified = tasks.map(t => ({ task: t, cat: classifyTask(t) }));
     const used = new Set();
     const result = [];
@@ -1537,9 +1616,9 @@
     return result;
   }
 
-  function validateSectionOrder(tasks, platform) {
-    if (!platform || !ORDER_TEMPLATES[platform]) return [];
-    const template = ORDER_TEMPLATES[platform];
+  function validateSectionOrder(tasks, platform, context = {}) {
+    const template = getOrderTemplate(platform, context);
+    if (!template) return [];
     const errors = [];
     let ptr = 0;
 
@@ -1560,11 +1639,60 @@
         const lastMatched = ptr > 0 ? template[ptr - 1] : null;
         if (lastMatched === cat) continue;
 
+        if (platform === "tecnico" && ["oQueAprendemos", "conclusao"].includes(cat) && !template.includes(cat)) {
+          errors.push(`"${task.title}" (${task.type}) n\u00e3o pertence a esta aula`);
+          continue;
+        }
+
         // Verifica se a categoria já foi consumida (fora de ordem)
         if (template.slice(0, ptr).includes(cat)) {
           errors.push(`"${task.title}" (${task.type}) está fora de ordem`);
         }
       }
+    }
+
+    return errors;
+  }
+
+  function validateTecnicoSectionRules(tasks, context = {}, luriMap = {}) {
+    const isFirst = context.sectionIndex === 0;
+    const isLast = context.totalSections > 0 && context.sectionIndex === context.totalSections - 1;
+    let videoCount = 0;
+    let aprofCount = 0;
+    let luriCount = 0;
+    let learnedCount = 0;
+    let conclusionCount = 0;
+
+    for (const task of tasks) {
+      const cat = classifyTask(task);
+      if (cat === "video") videoCount++;
+      if (cat === "aprofundamento") aprofCount++;
+      if (cat === "exercicio" && luriMap[task.editUrl] === true) luriCount++;
+      if (cat === "oQueAprendemos") learnedCount++;
+      if (cat === "conclusao") conclusionCount++;
+    }
+
+    const errors = [];
+    if (isFirst && learnedCount !== 1) {
+      errors.push(`${learnedCount === 0 ? "Sem atividade" : learnedCount + " atividades"} "O que aprendemos" — deve ter exatamente 1 na primeira aula.`);
+    }
+    if (!isFirst && learnedCount > 0) {
+      errors.push('"O que aprendemos" deve aparecer apenas na primeira aula.');
+    }
+    if (videoCount !== 1) {
+      errors.push(`${videoCount} v\u00eddeo(s) principal(is) — deve ter exatamente 1.`);
+    }
+    if (aprofCount !== 1) {
+      errors.push(`${aprofCount === 0 ? "Sem atividade" : aprofCount + " atividades"} "Aprofundamento" — deve ter exatamente 1.`);
+    }
+    if (luriCount !== 2) {
+      errors.push(`${luriCount} exerc\u00edcio(s) Luri — deve ter exatamente 2.`);
+    }
+    if (isLast && conclusionCount !== 1) {
+      errors.push(`${conclusionCount === 0 ? "Sem atividade" : conclusionCount + " atividades"} "Conclus\u00e3o" — deve ter exatamente 1 na \u00faltima aula.`);
+    }
+    if (!isLast && conclusionCount > 0) {
+      errors.push('"Conclus\u00e3o" deve aparecer apenas na \u00faltima aula.');
     }
 
     return errors;
@@ -1586,7 +1714,7 @@
       return sectionErrors;
     }
 
-    let videoCount = 0, aprofCount = 0, luriCount = 0;
+    let videoCount = 0, aprofCount = 0, luriCount = 0, learnedCount = 0, conclusionCount = 0;
 
     for (let ti = 0; ti < tasks.length; ti++) {
       const task = tasks[ti];
@@ -1637,15 +1765,18 @@
       // Contadores para regras do Curso Técnico (apenas tasks ativas)
       if (state.productType === "tecnico" && task.active) {
         const hasUrl = videoUrl && videoUrl.trim() !== "0" && videoUrl.trim() !== "";
-        if (task.type === "Vídeo" && hasUrl) videoCount++;
-        if (task.type === "Texto" && task.title.includes("Aprofundamento")) aprofCount++;
-        if (task.type === "Única escolha" && isLuri) luriCount++;
+        const cat = classifyTask(task);
+        if (cat === "video" && hasUrl) videoCount++;
+        if (cat === "aprofundamento") aprofCount++;
+        if (cat === "exercicio" && isLuri) luriCount++;
+        if (cat === "oQueAprendemos") learnedCount++;
+        if (cat === "conclusao") conclusionCount++;
       }
     }
 
     // ---- Validação de ordem das atividades ----
     if (state.platform) {
-      const orderErrors = validateSectionOrder(tasks, state.platform);
+      const orderErrors = validateSectionOrder(tasks, state.platform, { sectionIndex: si, totalSections });
       if (orderErrors.length > 0) {
         state.issues.orderIssues = state.issues.orderIssues || [];
         state.issues.orderIssues.push({ section: section.title, errors: orderErrors });
@@ -1656,18 +1787,27 @@
     if (state.productType === "tecnico") {
       const isFirst   = si === 0;
       const isLast    = si === totalSections - 1;
-      const minVideos = (isFirst || isLast) ? 2 : 1;
 
-      if (videoCount < minVideos || videoCount > 2) {
-        const label  = isFirst ? "primeira" : isLast ? "última" : "";
-        const detail = label ? `deve ter ≥ 2 vídeos (seção ${label})` : `deve ter 1 ou 2 vídeos`;
-        state.issues.tecnicoRules.push(`Seção "${section.title}": ${videoCount} vídeo(s) — ${detail}.`);
+      if (isFirst && learnedCount !== 1) {
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${learnedCount === 0 ? "sem atividade" : learnedCount + " atividades"} "O que aprendemos" — deve ter exatamente 1 na primeira aula.`);
+      }
+      if (!isFirst && learnedCount > 0) {
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": "O que aprendemos" deve aparecer apenas na primeira aula.`);
+      }
+      if (videoCount !== 1) {
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${videoCount} v\u00eddeo(s) principal(is) — deve ter exatamente 1.`);
       }
       if (aprofCount !== 1) {
-        state.issues.tecnicoRules.push(`Seção "${section.title}": ${aprofCount === 0 ? "sem atividade" : aprofCount + " atividades"} "Aprofundamento" — deve ter exatamente 1.`);
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${aprofCount === 0 ? "sem atividade" : aprofCount + " atividades"} "Aprofundamento" — deve ter exatamente 1.`);
       }
-      if (luriCount < 1 || luriCount > 2) {
-        state.issues.tecnicoRules.push(`Seção "${section.title}": ${luriCount} exercício(s) Luri — deve ter 1 ou 2.`);
+      if (luriCount !== 2) {
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${luriCount} exerc\u00edcio(s) Luri — deve ter exatamente 2.`);
+      }
+      if (isLast && conclusionCount !== 1) {
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${conclusionCount === 0 ? "sem atividade" : conclusionCount + " atividades"} "Conclus\u00e3o" — deve ter exatamente 1 na \u00faltima aula.`);
+      }
+      if (!isLast && conclusionCount > 0) {
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": "Conclus\u00e3o" deve aparecer apenas na \u00faltima aula.`);
       }
     }
 
@@ -1763,6 +1903,7 @@
   // ---------- Fluxo principal ----------
   async function startFromHome(productType = "tecnico", platform = null) {
     console.log("[Revisor] startFromHome iniciado");
+    const effectivePlatform = productType === "tecnico" ? "tecnico" : platform;
     await waitFor(() => isHomePage(), 20000);
     console.log("[Revisor] isHomePage OK");
 
@@ -1821,7 +1962,7 @@
       pendingIconCheck: false,
       totalActiveVideos: 0,
       productType,
-      platform,
+      platform: effectivePlatform,
       forumBlocked,
       themeOk,
       expectedTheme,

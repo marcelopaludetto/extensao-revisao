@@ -90,13 +90,13 @@ const ACTIVITY_ORDERS = {
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   tecnico: [
-    { label: "Vídeo 1.1 - O que vamos aprender?", note: "apenas aula 01", optional: true },
-    { label: "Preparando o ambiente", note: "caso tenha", optional: true },
-    { label: "Vídeo X.X" },
+    { label: "O que aprendemos", note: "apenas aula 01", optional: true },
+    { label: "Preparando ambiente", note: "opcional", optional: true },
+    { label: "V\u00eddeo X.X" },
     { label: "Aprofundamento" },
-    { label: "Exercício" },
-    { label: "Exercício" },
-    { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
+    { label: "Exerc\u00edcio Luri" },
+    { label: "Exerc\u00edcio Luri" },
+    { label: "Conclus\u00e3o", note: "apenas na \u00faltima aula", optional: true },
   ],
 };
 
@@ -111,31 +111,41 @@ function renderActivityChecklist(platform) {
 
   const items = ACTIVITY_ORDERS[platform];
   const fragment = document.createDocumentFragment();
+  const isFixedOrder = platform === "tecnico";
 
   items.forEach((item, i) => {
     const div = document.createElement("div");
-    div.className = "act-item" + (item.optional ? " optional" : "");
+    div.className = "act-item" + (item.optional ? " optional" : "") + (isFixedOrder ? " fixed" : "");
 
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.id = `act-cb-${i}`;
+    if (isFixedOrder) {
+      const step = document.createElement("span");
+      step.className = "act-step";
+      step.textContent = String(i + 1);
+      div.appendChild(step);
+    } else {
+      const cb = document.createElement("input");
+      cb.type = "checkbox";
+      cb.id = `act-cb-${i}`;
+      div.appendChild(cb);
+    }
 
     const lbl = document.createElement("label");
     lbl.htmlFor = `act-cb-${i}`;
     lbl.innerHTML = item.label + (item.note ? ` <span class="act-note">(${item.note})</span>` : "");
 
-    div.appendChild(cb);
     div.appendChild(lbl);
     fragment.appendChild(div);
   });
 
-  const resetBtn = document.createElement("button");
-  resetBtn.className = "act-reset-btn";
-  resetBtn.textContent = "Limpar";
-  resetBtn.addEventListener("click", () => {
-    container.querySelectorAll("input[type='checkbox']").forEach((cb) => (cb.checked = false));
-  });
-  fragment.appendChild(resetBtn);
+  if (!isFixedOrder) {
+    const resetBtn = document.createElement("button");
+    resetBtn.className = "act-reset-btn";
+    resetBtn.textContent = "Limpar";
+    resetBtn.addEventListener("click", () => {
+      container.querySelectorAll("input[type='checkbox']").forEach((cb) => (cb.checked = false));
+    });
+    fragment.appendChild(resetBtn);
+  }
 
   container.innerHTML = "";
   container.appendChild(fragment);
@@ -143,8 +153,35 @@ function renderActivityChecklist(platform) {
 
 const platformSelect = document.getElementById("platform-select");
 if (platformSelect) {
-  platformSelect.addEventListener("change", () => renderActivityChecklist(platformSelect.value));
+  platformSelect.addEventListener("change", () => {
+    platformSelect.dataset.autoTecnico = "0";
+    renderActivityChecklist(platformSelect.value);
+  });
 }
+
+function syncPlatformWithProductType() {
+  if (!platformSelect) return;
+
+  const productType = document.querySelector('input[name="productType"]:checked')?.value || "tecnico";
+  if (productType === "tecnico") {
+    platformSelect.value = "tecnico";
+    platformSelect.disabled = true;
+    platformSelect.dataset.autoTecnico = "1";
+  } else {
+    platformSelect.disabled = false;
+    if (platformSelect.dataset.autoTecnico === "1") {
+      platformSelect.value = "";
+    }
+    platformSelect.dataset.autoTecnico = "0";
+  }
+
+  renderActivityChecklist(platformSelect.value);
+}
+
+document.querySelectorAll('input[name="productType"]').forEach((radio) => {
+  radio.addEventListener("change", syncPlatformWithProductType);
+});
+syncPlatformWithProductType();
 
 const statusEl = document.getElementById("status");
 const btn = document.getElementById("start");
@@ -3610,7 +3647,8 @@ btn.addEventListener("click", async () => {
       setStatus("Iniciando…");
       const tab = await getActiveTab();
       const productType = document.querySelector('input[name="productType"]:checked')?.value || "tecnico";
-      const platform = document.getElementById("platform-select")?.value || null;
+      const selectedPlatform = document.getElementById("platform-select")?.value || null;
+      const platform = productType === "tecnico" ? "tecnico" : selectedPlatform;
       const ack = await chrome.tabs.sendMessage(tab.id, { type: "ALURA_REVISOR_START", productType, platform: platform || null });
 
       if (!ack?.ok) {
