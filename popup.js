@@ -470,6 +470,7 @@ const deactStatusEl    = document.getElementById("deact-status");
 const deactListEl      = document.getElementById("deact-list");
 const deactActionsEl   = document.getElementById("deact-actions");
 const deactConfirmBtn  = document.getElementById("deact-confirm-btn");
+const deactActivateBtn = document.getElementById("deact-activate-btn");
 const deactSelectAllBtn= document.getElementById("deact-select-all-btn");
 const deactCountEl     = document.getElementById("deact-count");
 
@@ -510,7 +511,6 @@ function renderDeactList(sections) {
       cb.type = "checkbox";
       cb.id = `deact-cb-${task.id}`;
       cb.dataset.editUrl = task.editUrl;
-      cb.disabled = !task.active;
       cb.addEventListener("change", updateDeactCount);
 
       const lbl = document.createElement("label");
@@ -590,45 +590,59 @@ deactSelectAllBtn?.addEventListener("click", () => {
   updateDeactCount();
 });
 
-deactConfirmBtn?.addEventListener("click", async () => {
+async function runDeactAction(action) {
   const selected = [...deactListEl.querySelectorAll("input[type='checkbox']:checked")];
   if (!selected.length) { deactStatusEl.textContent = "Nenhuma atividade selecionada."; return; }
 
-  if (!confirm(`Desativar ${selected.length} atividade(s)?`)) return;
+  const isDeactivate = action === "deactivate";
+  const verb = isDeactivate ? "Desativando" : "Ativando";
+  const msgType = isDeactivate ? "ALURA_REVISOR_DEACTIVATE_TASK" : "ALURA_REVISOR_ACTIVATE_TASK";
+  const doneVerb = isDeactivate ? "desativada(s)" : "ativada(s)";
 
   deactConfirmBtn.disabled = true;
+  deactActivateBtn.disabled = true;
   let done = 0, succeeded = 0;
-  const tab = await getActiveTab();
 
-  for (const cb of selected) {
-    deactStatusEl.textContent = `Desativando ${done + 1} de ${selected.length}…`;
-    try {
-      const resp = await chrome.tabs.sendMessage(tab.id, {
-        type: "ALURA_REVISOR_DEACTIVATE_TASK",
+  const CONCURRENCY = 4;
+  for (let i = 0; i < selected.length; i += CONCURRENCY) {
+    const batch = selected.slice(i, i + CONCURRENCY);
+    deactStatusEl.textContent = `${verb} ${Math.min(i + CONCURRENCY, selected.length)} de ${selected.length}…`;
+    const results = await Promise.allSettled(
+      batch.map(cb => chrome.runtime.sendMessage({
+        type: msgType,
         editUrl: cb.dataset.editUrl,
-      });
-      if (resp?.ok) {
+      }))
+    );
+    for (let j = 0; j < batch.length; j++) {
+      const cb = batch[j];
+      const r = results[j];
+      if (r.status === "fulfilled" && r.value?.ok) {
         succeeded++;
-        cb.disabled = true;
         cb.checked = false;
-        cb.closest(".deact-task-item")?.classList.add("inactive");
+        const item = cb.closest(".deact-task-item");
+        if (isDeactivate) item?.classList.add("inactive");
+        else item?.classList.remove("inactive");
       }
-    } catch { /* continua */ }
-    done++;
+      done++;
+    }
   }
 
   if (succeeded > 0) {
-    await logFeatureUsage("activity_deactivated", "deactivated", {
+    await logFeatureUsage("activity_deactivated", isDeactivate ? "deactivated" : "activated", {
       count: succeeded,
       metadata: { total: selected.length, succeeded, failed: done - succeeded },
     });
   }
 
-  deactStatusEl.textContent = `✅ ${done} atividade(s) desativada(s).`;
+  deactStatusEl.textContent = `✅ ${succeeded} atividade(s) ${doneVerb}.`;
   deactConfirmBtn.disabled = false;
+  deactActivateBtn.disabled = false;
   updateDeactCount();
   chrome.storage.session.remove("deactState");
-});
+}
+
+deactConfirmBtn?.addEventListener("click", () => runDeactAction("deactivate"));
+deactActivateBtn?.addEventListener("click", () => runDeactAction("activate"));
 
 // ---------- Tab switching ----------
 const tabReviewBtn = document.getElementById("tab-review-btn");
@@ -2305,6 +2319,37 @@ function handleImgFileList(fileList) {
   imgCourseInfo.style.display = "";
   imgGlobalStatus.textContent = "";
   renderImgCards();
+  checkExistingImgFiles();
+}
+
+async function checkExistingImgFiles() {
+  if (!imgCourseId) return;
+  const { r2AccessKey, r2SecretKey } = await chrome.storage.local.get(["r2AccessKey", "r2SecretKey"]);
+  if (!r2AccessKey || !r2SecretKey) return;
+
+  const CONCURRENCY = 4;
+  const queue = imgFiles.filter(f => f.status === "pending");
+
+  const worker = async () => {
+    while (queue.length > 0) {
+      const item = queue.shift();
+      if (item.status !== "pending") continue;
+      try {
+        const key = buildImgObjectKey(imgCourseId, item.name);
+        const { url, headers } = await signR2Request({
+          method: "HEAD", key, body: new ArrayBuffer(0), accessKey: r2AccessKey, secretKey: r2SecretKey,
+        });
+        const res = await fetch(url, { method: "HEAD", headers });
+        if (res.ok) {
+          item.status = "exists";
+          item.url = buildImgUrl(imgCourseId, item.name);
+          renderImgCards();
+        }
+      } catch (_) {}
+    }
+  };
+
+  await Promise.all(Array.from({ length: CONCURRENCY }, worker));
 }
 
 async function uploadImgItem(idx) {
@@ -2360,18 +2405,30 @@ function renderImgCards() {
     upBtn.style.color = "#0d1117";
     if (item.status === "uploading") { upBtn.textContent = "…"; upBtn.disabled = true; }
     else if (item.status === "done") { upBtn.textContent = "✓ OK"; upBtn.style.background = "#56A145"; upBtn.style.color = "#fff"; }
+    else if (item.status === "exists") { upBtn.textContent = "✓ Já no R2"; upBtn.style.background = "#3D6CE2"; upBtn.style.color = "#fff"; upBtn.disabled = true; }
     else if (item.status === "error") { upBtn.textContent = "Tentar"; upBtn.style.background = "#CA3328"; upBtn.style.color = "#fff"; }
     else upBtn.textContent = "Upload";
     upBtn.addEventListener("click", () => uploadImgItem(idx));
     row.appendChild(upBtn);
 
     const url = item.url || (imgCourseId ? buildImgUrl(imgCourseId, item.name) : "");
+
     const copyBtn = document.createElement("button");
     copyBtn.className = "edit-card-copy";
     copyBtn.textContent = "Copiar URL";
-    copyBtn.addEventListener("click", () => {
+    copyBtn.addEventListener("click", async () => {
+      const url = item.url || (imgCourseId ? buildImgUrl(imgCourseId, item.name) : "");
       if (!url) return;
-      navigator.clipboard.writeText(url);
+      try {
+        await navigator.clipboard.writeText(url);
+      } catch (_) {
+        const ta = document.createElement("textarea");
+        ta.value = url;
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
       copyBtn.textContent = "✓ Copiado";
       copyBtn.classList.add("done");
       setTimeout(() => { copyBtn.textContent = "Copiar URL"; copyBtn.classList.remove("done"); }, 1200);

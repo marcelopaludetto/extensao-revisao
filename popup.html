@@ -910,13 +910,14 @@
 
       <hr class="divider">
 
-      <div class="section-label">Desativar atividades em lote</div>
+      <div class="section-label">Ativar / Desativar atividades em lote</div>
       <input type="text" id="deact-course-id" placeholder="ID do curso (ex: 5285)">
       <button id="deact-fetch-btn" style="background:#0d1117;color:#50DEFF;border:1.5px solid #50DEFF;">Buscar atividades</button>
       <div id="deact-status" style="margin-top:6px;font-size:12px;color:#444d56;"></div>
       <div id="deact-list" style="margin-top:8px;display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;"></div>
       <div id="deact-actions" style="display:none;margin-top:8px;display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
         <button id="deact-confirm-btn" style="width:auto;padding:6px 14px;font-size:12px;background:#CA3328;color:#fff;border-radius:6px;">Desativar selecionadas</button>
+        <button id="deact-activate-btn" style="width:auto;padding:6px 14px;font-size:12px;background:#1a7f37;color:#fff;border-radius:6px;">Ativar selecionadas</button>
         <button id="deact-select-all-btn" style="width:auto;padding:6px 10px;font-size:11px;background:none;border:1.5px solid #d0d7de;color:#57606a;border-radius:6px;">Selecionar tudo</button>
         <span id="deact-count" style="font-size:11px;color:#57606a;"></span>
       </div>
@@ -942,9 +943,9 @@
         <span id="img-file-count"></span>
       </div>
 
-      <div id="img-files" style="display:flex;flex-direction:column;gap:8px;"></div>
+      <button id="img-upload-all-btn" style="display:none;background:#7B4FEB;color:#fff;">Upload todas as imagens</button>
 
-      <button id="img-upload-all-btn" style="display:none">Upload todas as imagens</button>
+      <div id="img-files" style="display:flex;flex-direction:column;gap:8px;"></div>
       <div id="img-global-status" style="margin-top:8px;font-size:12px;color:#444d56;"></div>
 
       <hr class="divider">

@@ -222,6 +222,85 @@ function openCatalogTab(courseId, baseUrl) {
   return openTab(url, 15000);
 }
 
+// Após criar uma atividade, o admin redireciona para a lista de tasks da seção.
+// Para corrigir a renderização do markdown: navega para essa lista, acha a task
+// pelo título, entra no link "Editar" e clica em Salvar novamente.
+async function resaveAfterCreate(tabId, courseId, sectionId, activityTitle) {
+  const baseUrl = "https://cursos.alura.com.br";
+
+  // Aguarda o salvamento inicial processar antes de navegar
+  await new Promise(r => setTimeout(r, 3000));
+
+  // Navega para a lista de tasks da seção
+  const tasksUrl = `${baseUrl}/admin/course/v2/${courseId}/section/${sectionId}/tasks`;
+  await chrome.tabs.update(tabId, { url: tasksUrl });
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 15000);
+    function listener(id, info) {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+
+  // Procura o link "Editar" da task pelo título na tabela #tasks-table
+  let editHref = null;
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: (title) => {
+        const rows = document.querySelectorAll("#tasks-table tbody tr");
+        if (!rows.length) return null;
+        for (const row of rows) {
+          if (row.cells[2]?.textContent?.trim() === title) {
+            return row.querySelector('a[href*="/task/edit/"]')?.getAttribute("href") || null;
+          }
+        }
+        // fallback: última task da lista (a recém-criada costuma ser a última)
+        const lastRow = [...rows].at(-1);
+        return lastRow?.querySelector('a[href*="/task/edit/"]')?.getAttribute("href") || null;
+      },
+      args: [activityTitle],
+    }).catch(() => null);
+    if (res?.[0]?.result) { editHref = res[0].result; break; }
+  }
+  if (!editHref) return;
+
+  // Navega para a URL de edição
+  await chrome.tabs.update(tabId, { url: `${baseUrl}${editHref}` });
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 15000);
+    function listener(id, info) {
+      if (id === tabId && info.status === "complete") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
+
+  // Aguarda #submitTask e clica
+  for (let i = 0; i < 20; i++) {
+    await new Promise(r => setTimeout(r, 500));
+    const res = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => !!document.querySelector("#submitTask"),
+    }).catch(() => null);
+    if (res?.[0]?.result) break;
+  }
+  await new Promise(r => setTimeout(r, 400));
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: () => { document.querySelector("#submitTask")?.click(); },
+  });
+  await new Promise(r => setTimeout(r, 2000));
+}
+
 function checkAnyInTarget(tabId) {
   return chrome.scripting.executeScript({
     target: { tabId },
@@ -1606,57 +1685,53 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 chrome.runtime.onInstalled.addListener(verificarAtualizacao);
 chrome.runtime.onStartup.addListener(verificarAtualizacao);
 
-// ---------- Desativar atividade ----------
+// ---------- Desativar / Ativar atividade ----------
+async function setTaskStatus(editUrl, status) {
+  let tabId;
+  try {
+    tabId = await openTab(editUrl);
+
+    let ready = false;
+    for (let i = 0; i < 20; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      const res = await chrome.scripting.executeScript({
+        target: { tabId },
+        func: () => !!document.getElementById("task.status")
+      });
+      if (res?.[0]?.result) { ready = true; break; }
+    }
+
+    if (!ready) return { ok: false, error: "Campo de status não encontrado." };
+
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [status],
+      func: (s) => {
+        const sel = document.getElementById("task.status");
+        if (!sel) return;
+        sel.value = s;
+        sel.dispatchEvent(new Event("change", { bubbles: true }));
+        document.querySelector("#submitTask, button[type='submit']")?.click();
+      }
+    });
+
+    await new Promise(r => setTimeout(r, 1500));
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: e?.message || String(e) };
+  } finally {
+    if (tabId != null) {
+      await new Promise(r => setTimeout(r, 300));
+      chrome.tabs.remove(tabId).catch(() => {});
+    }
+  }
+}
+
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
-  if (msg?.type !== "ALURA_REVISOR_DEACTIVATE_TASK") return;
-
-  (async () => {
-    let tabId;
-    try {
-      tabId = await openTab(msg.editUrl);
-
-      // Aguarda o select de status carregar
-      let ready = false;
-      for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 500));
-        const res = await chrome.scripting.executeScript({
-          target: { tabId },
-          func: () => !!document.getElementById("task.status")
-        });
-        if (res?.[0]?.result) { ready = true; break; }
-      }
-
-      if (!ready) {
-        sendResponse({ ok: false, error: "Campo de status não encontrado." });
-        return;
-      }
-
-      // Seta INACTIVE e salva
-      await chrome.scripting.executeScript({
-        target: { tabId },
-        func: () => {
-          const sel = document.getElementById("task.status");
-          if (!sel) return;
-          sel.value = "INACTIVE";
-          sel.dispatchEvent(new Event("change", { bubbles: true }));
-          const btn = document.querySelector("#submitTask, button[type='submit']");
-          btn?.click();
-        }
-      });
-
-      await new Promise(r => setTimeout(r, 1500));
-      sendResponse({ ok: true });
-    } catch (e) {
-      sendResponse({ ok: false, error: e?.message || String(e) });
-    } finally {
-      if (tabId != null) {
-        await new Promise(r => setTimeout(r, 300));
-        chrome.tabs.remove(tabId).catch(() => {});
-      }
-    }
-  })();
-
+  if (msg?.type !== "ALURA_REVISOR_DEACTIVATE_TASK" && msg?.type !== "ALURA_REVISOR_ACTIVATE_TASK") return;
+  const status = msg.type === "ALURA_REVISOR_DEACTIVATE_TASK" ? "INACTIVE" : "ACTIVE";
+  setTaskStatus(msg.editUrl, status).then(sendResponse);
   return true;
 });
 
@@ -1782,7 +1857,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: () => { document.querySelector("#submitTask")?.click(); }
       });
 
-      await new Promise(r => setTimeout(r, 2500));
+      // 8. Re-save na página de edição para garantir renderização do markdown
+      await resaveAfterCreate(tabId, msg.courseId, section.id, "Faça como eu fiz");
+
       await UsageReport.queueFeatureUsageLog("activity_published", "do_after_me_published", msg, {
         lessonNum: msg.lessonNum,
         activityType: "FEZ",
@@ -1960,8 +2037,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
 
-      // Aguardar o salvamento processar
-      await new Promise(r => setTimeout(r, 2500));
+      // 8. Re-save na página de edição para garantir renderização do markdown
+      await resaveAfterCreate(tabId, msg.courseId, section.id, "Hora do desafio!");
+
       await UsageReport.queueFeatureUsageLog("challenge_published", "challenge_published", msg, {
         lessonNum: msg.lessonNum,
       });
@@ -2127,7 +2205,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: () => { document.querySelector("#submitTask")?.click(); }
       });
 
-      await new Promise(r => setTimeout(r, 2500));
+      // 8. Re-save na página de edição para garantir renderização do markdown
+      await resaveAfterCreate(tabId, msg.courseId, section.id, activityTitle);
+
       await UsageReport.queueFeatureUsageLog("activity_published", "activity_published", msg, {
         lessonNum: msg.lessonNum,
         activityType: msg.activityType,

@@ -3468,17 +3468,6 @@
     return true;
   });
 
-  // ---------- Desativar em lote: desativa uma task ----------
-  chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
-    if (msg?.type !== "ALURA_REVISOR_DEACTIVATE_TASK") return;
-    (async () => {
-      try {
-        const resp = await sendToBackground({ type: "ALURA_REVISOR_DEACTIVATE_TASK", editUrl: msg.editUrl });
-        sendResponse(resp);
-      } catch (e) { sendResponse({ ok: false, error: e.message }); }
-    })();
-    return true;
-  });
 
   // ---------- Publicação: Faça como eu fiz via popup ----------
   chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
@@ -3701,10 +3690,6 @@
             await fillHked(dSection, q.text || "");
             await sleep(150);
             await fillHked(dSection, q.text || "");
-            setHidden(
-              dSection?.querySelector("input.hackeditor-sync"),
-              `<p>${(q.text || "").replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>")}</p>`
-            );
 
             const expected = wrapper.querySelector('textarea[name="expectedAnswer"]');
             if (expected && q.expectedAnswer) {
@@ -3715,15 +3700,16 @@
 
             await sleep(300);
             document.activeElement?.blur();
+            // Após o sleep: sobrescreve antes que o EasyMDE possa re-renderizar com HTML errado.
+            setHidden(
+              dSection?.querySelector("input.hackeditor-sync"),
+              markdownToHtml(q.text || "")
+            );
           } else {
             // Múltipla escolha: enunciado + alternativas + radio.
             // Enunciado: .assessment__question--alternative (hífen, não underscore)
             const qSection = wrapper.querySelector(".assessment__question--alternative");
             await fillHked(qSection, q.text || "");
-            setHidden(
-              qSection?.querySelector("input.hackeditor-sync"),
-              `<p>${(q.text || "").replace(/\n\n+/g, "</p><p>").replace(/\n/g, "<br>")}</p>`
-            );
 
             // Alternativas: seleciona por posição DOM — name é incorreto nas alternativas dinâmicas (C, D...)
             const altBlocks = wrapper.querySelectorAll(".assessment__question__alternative");
@@ -3737,6 +3723,11 @@
             // Aguarda DOM estabilizar após os execCommands antes de clicar no radio
             await sleep(500);
             document.activeElement?.blur();
+            // Após o sleep: sobrescreve antes que o EasyMDE possa re-renderizar com HTML errado.
+            setHidden(
+              qSection?.querySelector("input.hackeditor-sync"),
+              markdownToHtml(q.text || "")
+            );
 
             if (q.correctAlt) {
               const correctIdx = (q.alts || []).findIndex(a => a.letter === q.correctAlt);
