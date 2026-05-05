@@ -64,7 +64,7 @@ const ACTIVITY_ORDERS = {
     { label: "Hora do desafio" },
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que aprendemos (em vídeo)" },
+    { label: "O que vamos aprender (em vídeo)" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   vscode: [
@@ -81,7 +81,7 @@ const ACTIVITY_ORDERS = {
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Videos para SP", note: "aula 1 de código, aula 2 de código", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que aprendemos (em vídeo)" },
+    { label: "O que vamos aprender (em vídeo)" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   figma: [
@@ -96,7 +96,7 @@ const ACTIVITY_ORDERS = {
     { label: "Hora do desafio" },
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que aprendemos (em vídeo)" },
+    { label: "O que vamos aprender (em vídeo)" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   robotica: [
@@ -112,11 +112,11 @@ const ACTIVITY_ORDERS = {
     { label: "Hora do desafio" },
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que aprendemos (em vídeo)" },
+    { label: "O que vamos aprender (em vídeo)" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   tecnico: [
-    { label: "O que aprendemos", note: "apenas aula 01", optional: true },
+    { label: "O que vamos aprender?", note: "apenas aula 01", optional: true },
     { label: "Preparando ambiente", note: "opcional", optional: true },
     { label: "V\u00eddeo X.X" },
     { label: "Aprofundamento" },
@@ -2827,10 +2827,10 @@ if (fezAllBtn) {
 const AVAL_DESCRIPTION_MD =
 `Antes de começar, vamos entender como a nossa avaliação funciona?
 
-- A avaliação possui 10 questões. Cada questão possui 5 alternativas, sendo apenas uma alternativa correta.
-- Após ler o enunciado e escolher a alternativa certa, clique em "próxima questão" para continuar.
-- Ao finalizar todas as questões, clique em "Concluir avaliação" para concluir.
-- O resultado não sai na hora. O professor informará sua nota quando o resultado estiver disponível.
+- A avaliação possui **10 questões**. Cada questão possui 5 alternativas, sendo **apenas uma alternativa correta.**
+- Após ler o enunciado e escolher a alternativa certa, clique em **"próxima questão"** para continuar.
+- Ao finalizar todas as questões, clique em **"Concluir avaliação"** para concluir.
+- **O resultado não sai na hora.** O professor informará sua nota quando o resultado estiver disponível.
 
 E aí, pronto para embarcar nessa jornada com a gente?
 
@@ -2844,10 +2844,10 @@ Boa avaliação!`;
 const AVAL_DESCRIPTION_HTML =
 `<p>Antes de começar, vamos entender como a nossa avaliação funciona?</p>` +
 `<ul>` +
-`<li>A avaliação possui 10 questões. Cada questão possui 5 alternativas, sendo apenas uma alternativa correta.</li>` +
-`<li>Após ler o enunciado e escolher a alternativa certa, clique em "próxima questão" para continuar.</li>` +
-`<li>Ao finalizar todas as questões, clique em "Concluir avaliação" para concluir.</li>` +
-`<li>O resultado não sai na hora. O professor informará sua nota quando o resultado estiver disponível.</li>` +
+`<li>A avaliação possui <strong>10 questões</strong>. Cada questão possui 5 alternativas, sendo <strong>apenas uma alternativa correta.</strong></li>` +
+`<li>Após ler o enunciado e escolher a alternativa certa, clique em <strong>"próxima questão"</strong> para continuar.</li>` +
+`<li>Ao finalizar todas as questões, clique em <strong>"Concluir avaliação"</strong> para concluir.</li>` +
+`<li><strong>O resultado não sai na hora.</strong> O professor informará sua nota quando o resultado estiver disponível.</li>` +
 `</ul>` +
 `<p>E aí, pronto para embarcar nessa jornada com a gente?</p>` +
 `<p>Lembre-se de ler com calma as questões e as alternativas, revisar a alternativa que foi marcada antes de passar para próxima questão, beber água e ficar tranquilo(a).</p>` +

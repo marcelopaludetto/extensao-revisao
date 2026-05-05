@@ -106,12 +106,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   const r = msg.result || {};
   const okAll = !!r.transcriptionIs100 && !!r.finished && !r.error;
 
-  const title = okAll ? "Revisão finalizada ✅" : "Revisão finalizada ⚠️";
+  const title = okAll ? "RevisÃ£o finalizada âœ…" : "RevisÃ£o finalizada âš ï¸";
 
   const lines = [
-    `${r.transcriptionIs100 ? "✅" : "❌"} Transcrição 100% (atual: ${r.transcriptionPercentText || "?"})`,
-    `📌 Cliques em "Próxima atividade": ${typeof r.steps === "number" ? r.steps : "?"}`,
-    r.finished ? "🏁 Chegou ao fim do curso (voltou pra Home)" : "⏸️ Execução interrompida"
+    `${r.transcriptionIs100 ? "âœ…" : "âŒ"} TranscriÃ§Ã£o 100% (atual: ${r.transcriptionPercentText || "?"})`,
+    `ðŸ“Œ Cliques em "PrÃ³xima atividade": ${typeof r.steps === "number" ? r.steps : "?"}`,
+    r.finished ? "ðŸ Chegou ao fim do curso (voltou pra Home)" : "â¸ï¸ ExecuÃ§Ã£o interrompida"
   ];
 
   if (r.error) lines.push(`Erro: ${r.error}`);
@@ -222,16 +222,28 @@ function openCatalogTab(courseId, baseUrl) {
   return openTab(url, 15000);
 }
 
-// Após criar uma atividade, o admin redireciona para a lista de tasks da seção.
-// Para corrigir a renderização do markdown: navega para essa lista, acha a task
-// pelo título, entra no link "Editar" e clica em Salvar novamente.
+// ApÃ³s criar uma atividade, o admin redireciona para a lista de tasks da seÃ§Ã£o.
+// Para corrigir a renderizaÃ§Ã£o do markdown: navega para essa lista, acha a task
+// pelo tÃ­tulo, entra no link "Editar" e clica em Salvar novamente.
 async function resaveAfterCreate(tabId, courseId, sectionId, activityTitle) {
   const baseUrl = "https://cursos.alura.com.br";
 
-  // Aguarda o salvamento inicial processar antes de navegar
-  await new Promise(r => setTimeout(r, 3000));
+  // Aguarda o formulÃ¡rio de criaÃ§Ã£o submeter e o redirect completar
+  // antes de navegar (caso contrÃ¡rio o chrome.tabs.update cancela o POST)
+  await new Promise((resolve) => {
+    const timer = setTimeout(resolve, 10000);
+    function listener(id, info, tab) {
+      if (id !== tabId) return;
+      if (info.status === "complete" && tab.url && !tab.url.includes("/task/create")) {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    }
+    chrome.tabs.onUpdated.addListener(listener);
+  });
 
-  // Navega para a lista de tasks da seção
+  // Navega para a lista de tasks da seÃ§Ã£o
   const tasksUrl = `${baseUrl}/admin/course/v2/${courseId}/section/${sectionId}/tasks`;
   await chrome.tabs.update(tabId, { url: tasksUrl });
   await new Promise((resolve) => {
@@ -246,7 +258,7 @@ async function resaveAfterCreate(tabId, courseId, sectionId, activityTitle) {
     chrome.tabs.onUpdated.addListener(listener);
   });
 
-  // Procura o link "Editar" da task pelo título na tabela #tasks-table
+  // Procura o link "Editar" da task pelo tÃ­tulo na tabela #tasks-table
   let editHref = null;
   for (let i = 0; i < 20; i++) {
     await new Promise(r => setTimeout(r, 500));
@@ -260,7 +272,7 @@ async function resaveAfterCreate(tabId, courseId, sectionId, activityTitle) {
             return row.querySelector('a[href*="/task/edit/"]')?.getAttribute("href") || null;
           }
         }
-        // fallback: última task da lista (a recém-criada costuma ser a última)
+        // fallback: Ãºltima task da lista (a recÃ©m-criada costuma ser a Ãºltima)
         const lastRow = [...rows].at(-1);
         return lastRow?.querySelector('a[href*="/task/edit/"]')?.getAttribute("href") || null;
       },
@@ -270,7 +282,7 @@ async function resaveAfterCreate(tabId, courseId, sectionId, activityTitle) {
   }
   if (!editHref) return;
 
-  // Navega para a URL de edição
+  // Navega para a URL de ediÃ§Ã£o
   await chrome.tabs.update(tabId, { url: `${baseUrl}${editHref}` });
   await new Promise((resolve) => {
     const timer = setTimeout(resolve, 15000);
@@ -355,7 +367,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: (catalogLabel, catalogId) => {
           const sourceEl = document.querySelector("#source");
           if (!sourceEl) {
-            return { ok: false, error: "Seletor de catálogos não encontrado" };
+            return { ok: false, error: "Seletor de catÃ¡logos nÃ£o encontrado" };
           }
 
           let item = null;
@@ -374,12 +386,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           if (!item) {
             const desc = catalogId ? `ID ${catalogId}` : `"${catalogLabel}"`;
-            return { ok: false, error: `Catálogo ${desc} não encontrado na lista` };
+            return { ok: false, error: `CatÃ¡logo ${desc} nÃ£o encontrado na lista` };
           }
 
           const checkbox = item.querySelector(".connectedSortable_v2-item-checkbox");
           if (!checkbox) {
-            return { ok: false, error: "Checkbox do catálogo não encontrado" };
+            return { ok: false, error: "Checkbox do catÃ¡logo nÃ£o encontrado" };
           }
 
           checkbox.click();
@@ -391,7 +403,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!step1?.[0]?.result?.ok) {
         sendResponse({
           ok: false,
-          error: step1?.[0]?.result?.error || "Falha ao selecionar catálogo"
+          error: step1?.[0]?.result?.error || "Falha ao selecionar catÃ¡logo"
         });
         return;
       }
@@ -432,7 +444,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       await navDone;
 
-      // Após submit a página navega — não é possível verificar #target. Considera OK.
+      // ApÃ³s submit a pÃ¡gina navega â€” nÃ£o Ã© possÃ­vel verificar #target. Considera OK.
       console.log(`[Catalog] resultado: OK`);
       sendResponse({ ok: true });
     } catch (e) {
@@ -465,7 +477,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: (catalogLabel) => {
           const targetEl = document.querySelector("#target");
           if (!targetEl) {
-            return { ok: false, error: "Seletor #target não encontrado" };
+            return { ok: false, error: "Seletor #target nÃ£o encontrado" };
           }
 
           const items = targetEl.querySelectorAll(".connectedSortable_v2-item");
@@ -477,7 +489,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               const checkbox = item.querySelector(".connectedSortable_v2-item-checkbox");
 
               if (!checkbox) {
-                return { ok: false, error: `Checkbox de "${catalogLabel}" não encontrado` };
+                return { ok: false, error: `Checkbox de "${catalogLabel}" nÃ£o encontrado` };
               }
 
               checkbox.click();
@@ -487,7 +499,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
           return {
             ok: false,
-            error: `Catálogo "${catalogLabel}" não encontrado em #target`
+            error: `CatÃ¡logo "${catalogLabel}" nÃ£o encontrado em #target`
           };
         },
         args: [msg.catalogLabel]
@@ -496,7 +508,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!step1?.[0]?.result?.ok) {
         sendResponse({
           ok: false,
-          error: step1?.[0]?.result?.error || "Falha ao selecionar catálogo em #target"
+          error: step1?.[0]?.result?.error || "Falha ao selecionar catÃ¡logo em #target"
         });
         return;
       }
@@ -610,7 +622,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!svgResp.ok) {
         sendResponse({
           ok: false,
-          error: `SVG template não encontrado: ${categorySlug}.svg`
+          error: `SVG template nÃ£o encontrado: ${categorySlug}.svg`
         });
         return;
       }
@@ -794,7 +806,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const allTdText = [...document.querySelectorAll("[data-subtitle-id] td")]
               .map(td => (td.textContent || "").trim().toLowerCase());
             if (checks.pt)  hasPortugues = allTdText.some(t => t.includes("portugu"));
-            if (checks.esp) hasEspanhol  = allTdText.some(t => t.includes("espanhol") || t.includes("español"));
+            if (checks.esp) hasEspanhol  = allTdText.some(t => t.includes("espanhol") || t.includes("espaÃ±ol"));
           }
 
           return { videoName, hasPortugues, hasEspanhol };
@@ -804,8 +816,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       const r = result?.[0]?.result ?? { videoName: "", hasPortugues: false, hasEspanhol: false };
 
-      // Se faltar PT ou ES (entre os idiomas verificados), solicita geração via
-      // POST direto no endpoint do form "Gerar legenda" (mesma sessão da aba).
+      // Se faltar PT ou ES (entre os idiomas verificados), solicita geraÃ§Ã£o via
+      // POST direto no endpoint do form "Gerar legenda" (mesma sessÃ£o da aba).
       let legendaSolicitada = false;
       let usageLog = null;
       const faltaAlguma = (checks.pt && !r.hasPortugues) || (checks.esp && !r.hasEspanhol);
@@ -816,10 +828,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             func: async () => {
               const btn = [...document.querySelectorAll('button[type="submit"], input[type="submit"]')]
                 .find(b => /gerar\s+legenda/i.test((b.textContent || b.value || "").trim()));
-              if (!btn) return { ok: false, reason: "botão não encontrado" };
+              if (!btn) return { ok: false, reason: "botÃ£o nÃ£o encontrado" };
 
               const form = btn.closest("form");
-              if (!form) return { ok: false, reason: "form não encontrado" };
+              if (!form) return { ok: false, reason: "form nÃ£o encontrado" };
 
               const action = form.action;
               const method = (form.method || "POST").toUpperCase();
@@ -847,7 +859,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }
           }
         } catch (_) {
-          // silencioso: falha ao solicitar não bloqueia a auditoria
+          // silencioso: falha ao solicitar nÃ£o bloqueia a auditoria
         }
       }
 
@@ -906,17 +918,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       tabId = await openTab(msg.editUrl);
 
-      // Loop externo no service worker: executeScript com função SÍNCRONA no MAIN world.
-      // Funções async no MAIN world podem não ter o resultado capturado corretamente pelo
-      // Chrome (a Promise não é esperada), fazendo results[0].result ficar undefined.
-      // Solução: polling fora do executeScript, injetando função síncrona a cada tentativa.
+      // Loop externo no service worker: executeScript com funÃ§Ã£o SÃNCRONA no MAIN world.
+      // FunÃ§Ãµes async no MAIN world podem nÃ£o ter o resultado capturado corretamente pelo
+      // Chrome (a Promise nÃ£o Ã© esperada), fazendo results[0].result ficar undefined.
+      // SoluÃ§Ã£o: polling fora do executeScript, injetando funÃ§Ã£o sÃ­ncrona a cada tentativa.
       let contentResult = { videoUrl: null, htmlContents: [], transcriptionText: "" };
 
       for (let attempt = 0; attempt < 6; attempt++) {
         const res = await chrome.scripting.executeScript({
           target: { tabId },
-          // MAIN world: acessa expando cmEl.CodeMirror setado pelo script da página.
-          // No isolated world padrão essa propriedade é invisível.
+          // MAIN world: acessa expando cmEl.CodeMirror setado pelo script da pÃ¡gina.
+          // No isolated world padrÃ£o essa propriedade Ã© invisÃ­vel.
           world: "MAIN",
           func: () => {
             const videoUrl = document.querySelector("input[name='uri']")?.value ?? null;
@@ -934,7 +946,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }).filter(a => a.body);
 
             // cm.getValue() retorna o texto completo do CodeMirror sem virtual scrolling.
-            // Só acessível via MAIN world (expando no elemento .CodeMirror).
+            // SÃ³ acessÃ­vel via MAIN world (expando no elemento .CodeMirror).
             const transcriptionText = [...document.querySelectorAll("textarea.markdownEditor-source")]
               .map(ta => {
                 const cmEl = ta.closest(".hackeditor")?.querySelector(".CodeMirror");
@@ -953,11 +965,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         const r = res?.[0]?.result;
         if (r) {
           contentResult = r;
-          // Checkbox de Luri tem prioridade — quebra assim que aparecer
+          // Checkbox de Luri tem prioridade â€” quebra assim que aparecer
           if (r.hasSingleChoiceField) break;
-          // Para vídeos, quebra quando tiver transcrição
+          // Para vÃ­deos, quebra quando tiver transcriÃ§Ã£o
           if (r.videoUrl && r.videoUrl !== "0" && r.transcriptionText.length > 0) break;
-          // Para outros conteúdos, aguarda ao menos 1 ciclo (500ms) para o checkbox ter chance de renderizar
+          // Para outros conteÃºdos, aguarda ao menos 1 ciclo (500ms) para o checkbox ter chance de renderizar
           if ((r.transcriptionText.length > 0 || r.htmlContents.length > 0) && attempt >= 1) break;
         }
 
@@ -1061,7 +1073,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             }))
             .filter(sub =>
               sub.id &&
-              sub.category !== "Cursos proprietários" &&
+              sub.category !== "Cursos proprietÃ¡rios" &&
               !sub.urlSlug.includes("escolas")
             );
         },
@@ -1094,7 +1106,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       const step1 = await chrome.scripting.executeScript({
         target: { tabId },
         func: async (courseId) => {
-          // Aguarda os itens do connectedSortable renderizarem (até 8s)
+          // Aguarda os itens do connectedSortable renderizarem (atÃ© 8s)
           const waitForItems = (ms = 8000) => new Promise(resolve => {
             const start = Date.now();
             const check = () => {
@@ -1105,9 +1117,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             check();
           });
           const loaded = await waitForItems();
-          if (!loaded) return { ok: false, error: "Timeout: itens do connectedSortable não carregaram em 8s." };
+          if (!loaded) return { ok: false, error: "Timeout: itens do connectedSortable nÃ£o carregaram em 8s." };
 
-          // Se o curso já está em #target, considera OK sem precisar adicionar
+          // Se o curso jÃ¡ estÃ¡ em #target, considera OK sem precisar adicionar
           const alreadyInTarget = document.querySelector(`.connectedSortable_v2-item-checkbox[value="${courseId}"]`) !== null
             && (() => {
               const cb = document.querySelector(`.connectedSortable_v2-item-checkbox[value="${courseId}"]`);
@@ -1119,7 +1131,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           if (!checkboxAnywhere) {
             const allCbs = [...document.querySelectorAll(".connectedSortable_v2-item-checkbox")];
             const sample = allCbs.slice(0, 8).map(el => el.value).join(", ");
-            return { ok: false, error: `Curso ${courseId} não encontrado. Total: ${allCbs.length}. Valores exemplo: ${sample}` };
+            return { ok: false, error: `Curso ${courseId} nÃ£o encontrado. Total: ${allCbs.length}. Valores exemplo: ${sample}` };
           }
           checkboxAnywhere.click();
           return { ok: true };
@@ -1132,9 +1144,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      // Curso já estava na subcategoria — não precisa submeter
+      // Curso jÃ¡ estava na subcategoria â€” nÃ£o precisa submeter
       if (step1?.[0]?.result?.alreadyPresent) {
-        console.log(`[Subcategory] já estava na subcategoria`);
+        console.log(`[Subcategory] jÃ¡ estava na subcategoria`);
         sendResponse({ ok: true });
         return;
       }
@@ -1162,7 +1174,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }).catch(() => {});
       await navDone;
 
-      // Após submit a página navega — não é possível verificar #target. Considera OK.
+      // ApÃ³s submit a pÃ¡gina navega â€” nÃ£o Ã© possÃ­vel verificar #target. Considera OK.
       console.log(`[Subcategory] resultado: OK`);
       sendResponse({ ok: true });
     } catch (e) {
@@ -1244,10 +1256,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           const ementa = document.querySelector("textarea[name='ementa.raw']")?.value?.trim() ?? "";
           const courseExclusive = document.querySelector("#courseExclusive")?.checked ?? false;
 
-          // Log de diagnóstico: lista todos os checkboxes da página para identificar o seletor correto
+          // Log de diagnÃ³stico: lista todos os checkboxes da pÃ¡gina para identificar o seletor correto
           const allCheckboxes = [...document.querySelectorAll("input[type='checkbox']")]
             .map(el => ({ id: el.id, name: el.name, checked: el.checked }));
-          console.log("[Revisor] Checkboxes na página admin:", JSON.stringify(allCheckboxes));
+          console.log("[Revisor] Checkboxes na pÃ¡gina admin:", JSON.stringify(allCheckboxes));
 
           const forumBlocked =
             document.querySelector("#isToBlockForum")?.checked ??
@@ -1302,14 +1314,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             document.querySelector("input[name='forumBlocked']");
 
           if (!checkbox) {
-            // Diagnóstico: lista todos os checkboxes para identificar o seletor correto
+            // DiagnÃ³stico: lista todos os checkboxes para identificar o seletor correto
             const all = [...document.querySelectorAll("input[type='checkbox']")]
               .map(el => `id="${el.id}" name="${el.name}"`).join(" | ");
-            return { ok: false, error: `Checkbox não encontrado. Checkboxes na página: ${all || "(nenhum)"}` };
+            return { ok: false, error: `Checkbox nÃ£o encontrado. Checkboxes na pÃ¡gina: ${all || "(nenhum)"}` };
           }
           if (checkbox.checked) return { ok: true, alreadyChecked: true };
 
-          // Tenta via label primeiro (mais confiável no React)
+          // Tenta via label primeiro (mais confiÃ¡vel no React)
           const label =
             (checkbox.id && document.querySelector(`label[for="${checkbox.id}"]`)) ||
             checkbox.closest("label");
@@ -1343,7 +1355,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       const checked = verifyResults?.[0]?.result?.checked;
       if (!checked) {
-        sendResponse({ ok: false, error: "Checkbox não ficou marcado após o clique. Pode ser necessário marcar manualmente no admin." });
+        sendResponse({ ok: false, error: "Checkbox nÃ£o ficou marcado apÃ³s o clique. Pode ser necessÃ¡rio marcar manualmente no admin." });
         return;
       }
 
@@ -1355,7 +1367,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             document.querySelector("#submit-form__button") ||
             document.querySelector("input[type='submit']") ||
             document.querySelector("button[type='submit']");
-          if (!btn) return { ok: false, error: "Botão salvar não encontrado." };
+          if (!btn) return { ok: false, error: "BotÃ£o salvar nÃ£o encontrado." };
           btn.click();
           return { ok: true };
         }
@@ -1390,10 +1402,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         args: [msg.expectedTheme],
         func: (expectedTheme) => {
           const select = document.querySelector("#theme");
-          if (!select) return { ok: false, error: "Select #theme não encontrado." };
+          if (!select) return { ok: false, error: "Select #theme nÃ£o encontrado." };
           if (select.value === expectedTheme) return { ok: true, alreadyCorrect: true };
 
-          // Usa o setter nativo para que o React/Vue reconheça a mudança
+          // Usa o setter nativo para que o React/Vue reconheÃ§a a mudanÃ§a
           const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
           setter.call(select, expectedTheme);
           select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1414,7 +1426,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             document.querySelector("#submit-form__button") ||
             document.querySelector("input[type='submit']") ||
             document.querySelector("button[type='submit']");
-          if (!btn) return { ok: false, error: "Botão salvar não encontrado." };
+          if (!btn) return { ok: false, error: "BotÃ£o salvar nÃ£o encontrado." };
           btn.click();
           return { ok: true };
         }
@@ -1448,7 +1460,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         target: { tabId },
         args: [String(msg.courseId)],
         func: async (courseId) => {
-          // Aguarda os itens renderizarem (até 8s)
+          // Aguarda os itens renderizarem (atÃ© 8s)
           const loaded = await new Promise(resolve => {
             const start = Date.now();
             const check = () => {
@@ -1500,7 +1512,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       tabId = await openTab(msg.editUrl);
 
-      // Polling até o select#chooseTask aparecer
+      // Polling atÃ© o select#chooseTask aparecer
       let result = { taskEnum: null, dataTag: null };
       for (let attempt = 0; attempt < 6; attempt++) {
         const res = await chrome.scripting.executeScript({
@@ -1531,7 +1543,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// Handler 2: Busca tradução em espanhol de uma task da Alura
+// Handler 2: Busca traduÃ§Ã£o em espanhol de uma task da Alura
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
   if (msg?.type !== "ALURA_REVISOR_FETCH_TRANSLATION") return;
@@ -1551,7 +1563,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       } catch (_) { /* fallback */ }
 
-      // Fallback: abrir tab em cursos.alura.com.br e fazer fetch de lá
+      // Fallback: abrir tab em cursos.alura.com.br e fazer fetch de lÃ¡
       tabId = await openTab("https://cursos.alura.com.br/dashboard", 20000);
       const res = await chrome.scripting.executeScript({
         target: { tabId },
@@ -1581,7 +1593,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ---------- Verificação de atualização ----------
+// ---------- VerificaÃ§Ã£o de atualizaÃ§Ã£o ----------
 async function verificarAtualizacao() {
   try {
     const resp = await fetch("https://hub-producao-conteudo.vercel.app/update.xml");
@@ -1604,7 +1616,7 @@ async function verificarAtualizacao() {
       chrome.action.setBadgeText({ text: "" });
     }
   } catch (e) {
-    console.warn("[Revisor] Falha ao verificar atualização:", e?.message);
+    console.warn("[Revisor] Falha ao verificar atualizaÃ§Ã£o:", e?.message);
   }
 }
 
@@ -1623,11 +1635,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         target: { tabId },
         func: (orderedTaskIds) => {
           const tbody = document.querySelector("#tasks-table tbody");
-          if (!tbody) return { ok: false, error: "#tasks-table tbody não encontrado" };
+          if (!tbody) return { ok: false, error: "#tasks-table tbody nÃ£o encontrado" };
 
           const rows = [...tbody.querySelectorAll("tr")];
 
-          // Mapeia cada linha ao ID da task (via input[name='sectionIds'] ou link de edição)
+          // Mapeia cada linha ao ID da task (via input[name='sectionIds'] ou link de ediÃ§Ã£o)
           const rowsWithId = rows.map(tr => {
             const id = tr.querySelector("input[name='sectionIds']")?.value
               || tr.querySelector("a[href*='/task/edit/']")?.href?.match(/\/task\/edit\/(\d+)/)?.[1]
@@ -1648,7 +1660,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           for (const { tr } of sorted) tbody.appendChild(tr);
 
           const btn = document.querySelector("#button__submit");
-          if (!btn) return { ok: false, error: "Botão 'Alterar ordem' não encontrado" };
+          if (!btn) return { ok: false, error: "BotÃ£o 'Alterar ordem' nÃ£o encontrado" };
           btn.click();
 
           return { ok: true };
@@ -1662,7 +1674,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      // Aguarda o form POST recarregar a página
+      // Aguarda o form POST recarregar a pÃ¡gina
       await new Promise(r => setTimeout(r, 500));
       await waitForTabComplete(tabId, 10000);
       await UsageReport.queueFeatureUsageLog("activity_order_fixed", "section_tasks_reordered", msg, {
@@ -1701,7 +1713,7 @@ async function setTaskStatus(editUrl, status) {
       if (res?.[0]?.result) { ready = true; break; }
     }
 
-    if (!ready) return { ok: false, error: "Campo de status não encontrado." };
+    if (!ready) return { ok: false, error: "Campo de status nÃ£o encontrado." };
 
     await chrome.scripting.executeScript({
       target: { tabId },
@@ -1735,7 +1747,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ---------- Publicação: Faça como eu fiz ----------
+// ---------- PublicaÃ§Ã£o: FaÃ§a como eu fiz ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
   if (msg?.type !== "ALURA_REVISOR_PUBLISH_FEZ_TASK") return;
@@ -1745,7 +1757,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       const baseUrl = "https://cursos.alura.com.br";
 
-      // 1. Busca seções e pega o sectionId da aula
+      // 1. Busca seÃ§Ãµes e pega o sectionId da aula
       const sectionsUrl = `${baseUrl}/admin/courses/v2/${msg.courseId}/sections`;
       tabId = await openTab(sectionsUrl);
 
@@ -1764,9 +1776,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       const section = sections[msg.lessonNum - 1];
-      if (!section?.id) { sendResponse({ ok: false, error: `Seção da Aula ${msg.lessonNum} não encontrada.` }); return; }
+      if (!section?.id) { sendResponse({ ok: false, error: `SeÃ§Ã£o da Aula ${msg.lessonNum} nÃ£o encontrada.` }); return; }
 
-      // 2. Navegar para criação de atividade
+      // 2. Navegar para criaÃ§Ã£o de atividade
       const createUrl = `${baseUrl}/admin/course/v2/${msg.courseId}/section/${section.id}/task/create`;
       await chrome.tabs.update(tabId, { url: createUrl });
 
@@ -1777,14 +1789,14 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (res?.[0]?.result) break;
       }
 
-      // 3. Seleciona "Faça como eu fiz na aula" (value="3")
+      // 3. Seleciona "FaÃ§a como eu fiz na aula" (value="3")
       const clicked = await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
           const option = document.querySelector('option[data-tag="DO_AFTER_ME"]');
-          if (!option) return { ok: false, error: "opção não encontrada" };
+          if (!option) return { ok: false, error: "opÃ§Ã£o nÃ£o encontrada" };
           const select = option.closest("select");
-          if (!select) return { ok: false, error: "select não encontrado" };
+          if (!select) return { ok: false, error: "select nÃ£o encontrado" };
           select.value = option.value;
           select.dispatchEvent(new Event("change", { bubbles: true }));
           return { ok: true };
@@ -1792,7 +1804,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
       if (!clicked?.[0]?.result?.ok) { sendResponse({ ok: false, error: clicked?.[0]?.result?.error || "Erro ao selecionar tipo" }); return; }
 
-      // 4. Aguarda formulário (campo título + editores)
+      // 4. Aguarda formulÃ¡rio (campo tÃ­tulo + editores)
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
         const res = await chrome.scripting.executeScript({
@@ -1802,16 +1814,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (res?.[0]?.result) break;
       }
 
-      // 5. Preenche título
+      // 5. Preenche tÃ­tulo
       await chrome.scripting.executeScript({
         target: { tabId },
         func: () => {
           const el = document.getElementById("task.title") || document.querySelector('input[name="title"]');
-          if (el) { el.value = "Faça como eu fiz"; el.dispatchEvent(new Event("input", { bubbles: true })); }
+          if (el) { el.value = "FaÃ§a como eu fiz"; el.dispatchEvent(new Event("input", { bubbles: true })); }
         }
       });
 
-      // 6. Função auxiliar: copia para clipboard e cola no CodeMirror indicado
+      // 6. FunÃ§Ã£o auxiliar: copia para clipboard e cola no CodeMirror indicado
       async function pasteIntoEditor(selector, content) {
         await chrome.scripting.executeScript({
           target: { tabId },
@@ -1821,7 +1833,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             if (!cmEl?.CodeMirror) return false;
             const cm = cmEl.CodeMirror;
 
-            // 1. Seta o conteúdo diretamente via API do CodeMirror
+            // 1. Seta o conteÃºdo diretamente via API do CodeMirror
             cm.focus();
             cm.setValue(text);
 
@@ -1842,10 +1854,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await new Promise(r => setTimeout(r, 400));
       }
 
-      // Conteúdo → #text .CodeMirror
+      // ConteÃºdo â†’ #text .CodeMirror
       await pasteIntoEditor("#text .CodeMirror", msg.content);
 
-      // Opinião → #opinion .CodeMirror
+      // OpiniÃ£o â†’ #opinion .CodeMirror
       if (msg.opinion) {
         await pasteIntoEditor("#opinion .CodeMirror", msg.opinion);
       }
@@ -1857,8 +1869,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: () => { document.querySelector("#submitTask")?.click(); }
       });
 
-      // 8. Re-save na página de edição para garantir renderização do markdown
-      await resaveAfterCreate(tabId, msg.courseId, section.id, "Faça como eu fiz");
+      // 8. Re-save na pÃ¡gina de ediÃ§Ã£o para garantir renderizaÃ§Ã£o do markdown
+      await resaveAfterCreate(tabId, msg.courseId, section.id, "FaÃ§a como eu fiz");
 
       await UsageReport.queueFeatureUsageLog("activity_published", "do_after_me_published", msg, {
         lessonNum: msg.lessonNum,
@@ -1876,7 +1888,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ---------- Publicação: Desafio ----------
+// ---------- PublicaÃ§Ã£o: Desafio ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
   if (msg?.type !== "ALURA_REVISOR_PUBLISH_DESAFIO_TASK") return;
@@ -1886,7 +1898,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       const baseUrl = "https://cursos.alura.com.br";
 
-      // 1. Abrir página de seções para descobrir o sectionId da aula
+      // 1. Abrir pÃ¡gina de seÃ§Ãµes para descobrir o sectionId da aula
       const sectionsUrl = `${baseUrl}/admin/courses/v2/${msg.courseId}/sections`;
       tabId = await openTab(sectionsUrl);
 
@@ -1909,11 +1921,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       const section = sections[msg.lessonNum - 1];
       if (!section?.id) {
-        sendResponse({ ok: false, error: `Seção da Aula ${msg.lessonNum} não encontrada (total: ${sections.length}).` });
+        sendResponse({ ok: false, error: `SeÃ§Ã£o da Aula ${msg.lessonNum} nÃ£o encontrada (total: ${sections.length}).` });
         return;
       }
 
-      // 2. Navegar para a página de criação de atividade da seção
+      // 2. Navegar para a pÃ¡gina de criaÃ§Ã£o de atividade da seÃ§Ã£o
       const createUrl = `${baseUrl}/admin/course/v2/${msg.courseId}/section/${section.id}/task/create`;
       await chrome.tabs.update(tabId, { url: createUrl });
 
@@ -1929,7 +1941,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       if (!chooseReady) {
-        sendResponse({ ok: false, error: "Página de criação não carregou (#chooseTask)." });
+        sendResponse({ ok: false, error: "PÃ¡gina de criaÃ§Ã£o nÃ£o carregou (#chooseTask)." });
         return;
       }
 
@@ -1938,10 +1950,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         target: { tabId },
         func: () => {
           const option = document.querySelector('option[data-title="Para saber mais"]');
-          if (!option) return { ok: false, error: "option não encontrada" };
+          if (!option) return { ok: false, error: "option nÃ£o encontrada" };
 
           const select = option.closest("select");
-          if (!select) return { ok: false, error: "select não encontrado" };
+          if (!select) return { ok: false, error: "select nÃ£o encontrado" };
 
           select.value = option.value;
           select.dispatchEvent(new Event("change", { bubbles: true }));
@@ -1951,11 +1963,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
 
       if (!clicked?.[0]?.result?.ok) {
-        sendResponse({ ok: false, error: `"Para saber mais" não encontrado. ${clicked?.[0]?.result?.error || ""}` });
+        sendResponse({ ok: false, error: `"Para saber mais" nÃ£o encontrado. ${clicked?.[0]?.result?.error || ""}` });
         return;
       }
 
-      // 4. Aguardar o formulário de criação carregar (nome + editor)
+      // 4. Aguardar o formulÃ¡rio de criaÃ§Ã£o carregar (nome + editor)
       let formReady = false;
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
@@ -1967,7 +1979,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       if (!formReady) {
-        sendResponse({ ok: false, error: "Formulário de criação não carregou após selecionar 'Para saber mais'." });
+        sendResponse({ ok: false, error: "FormulÃ¡rio de criaÃ§Ã£o nÃ£o carregou apÃ³s selecionar 'Para saber mais'." });
         return;
       }
 
@@ -1977,7 +1989,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: (name) => {
           const selectors = [
             'input[name="title"]', 'input[name="name"]', 'input[name="taskTitle"]',
-            'input[placeholder*="ome"]', 'input[placeholder*="ítulo"]',
+            'input[placeholder*="ome"]', 'input[placeholder*="Ã­tulo"]',
             '.form-group input[type="text"]'
           ];
           for (const sel of selectors) {
@@ -1994,7 +2006,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         args: ["Hora do desafio!"]
       });
 
-      // 6. Preencher o conteúdo no editor via foco + clipboard paste
+      // 6. Preencher o conteÃºdo no editor via foco + clipboard paste
       await new Promise(r => setTimeout(r, 400));
       await chrome.scripting.executeScript({
         target: { tabId },
@@ -2037,7 +2049,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         }
       });
 
-      // 8. Re-save na página de edição para garantir renderização do markdown
+      // 8. Re-save na pÃ¡gina de ediÃ§Ã£o para garantir renderizaÃ§Ã£o do markdown
       await resaveAfterCreate(tabId, msg.courseId, section.id, "Hora do desafio!");
 
       await UsageReport.queueFeatureUsageLog("challenge_published", "challenge_published", msg, {
@@ -2058,7 +2070,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ---------- Publicação: atividade unificada (PREP/FEZ/PSM/GLOSSARIO) ----------
+// ---------- PublicaÃ§Ã£o: atividade unificada (PREP/FEZ/PSM/GLOSSARIO) ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
   if (msg?.type !== "ALURA_REVISOR_PUBLISH_ACTIVITY") return;
@@ -2068,10 +2080,10 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     try {
       const baseUrl = "https://cursos.alura.com.br";
 
-      // Mapeamento de tipo → data-tag e título padrão
+      // Mapeamento de tipo â†’ data-tag e tÃ­tulo padrÃ£o
       const TYPE_MAP = {
         PREP:     { dataTag: "SETUP_EXPLANATION",        defaultTitle: "Preparando o ambiente" },
-        FEZ:      { dataTag: "DO_AFTER_ME",              defaultTitle: "Faça como eu fiz" },
+        FEZ:      { dataTag: "DO_AFTER_ME",              defaultTitle: "FaÃ§a como eu fiz" },
         PSM:      { dataTag: "COMPLEMENTARY_INFORMATION",defaultTitle: null },
         GLOSSARIO:{ dataTag: "COMPLEMENTARY_INFORMATION",defaultTitle: null },
       };
@@ -2080,7 +2092,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       const activityTitle = typeInfo.defaultTitle || msg.activityName || "Atividade";
 
-      // 1. Busca seções para obter sectionId da aula
+      // 1. Busca seÃ§Ãµes para obter sectionId da aula
       const sectionsUrl = `${baseUrl}/admin/courses/v2/${msg.courseId}/sections`;
       tabId = await openTab(sectionsUrl);
 
@@ -2100,11 +2112,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       const section = sections[msg.lessonNum - 1];
       if (!section?.id) {
-        sendResponse({ ok: false, error: `Seção da Aula ${msg.lessonNum} não encontrada (total: ${sections.length}).` });
+        sendResponse({ ok: false, error: `SeÃ§Ã£o da Aula ${msg.lessonNum} nÃ£o encontrada (total: ${sections.length}).` });
         return;
       }
 
-      // 2. Navega para criação de atividade
+      // 2. Navega para criaÃ§Ã£o de atividade
       const createUrl = `${baseUrl}/admin/course/v2/${msg.courseId}/section/${section.id}/task/create`;
       await chrome.tabs.update(tabId, { url: createUrl });
 
@@ -2119,9 +2131,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         target: { tabId },
         func: (dataTag) => {
           const option = document.querySelector(`option[data-tag="${dataTag}"]`);
-          if (!option) return { ok: false, error: `opção data-tag="${dataTag}" não encontrada` };
+          if (!option) return { ok: false, error: `opÃ§Ã£o data-tag="${dataTag}" nÃ£o encontrada` };
           const select = option.closest("select");
-          if (!select) return { ok: false, error: "select não encontrado" };
+          if (!select) return { ok: false, error: "select nÃ£o encontrado" };
           select.value = option.value;
           select.dispatchEvent(new Event("change", { bubbles: true }));
           return { ok: true };
@@ -2133,7 +2145,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      // 4. Aguarda formulário
+      // 4. Aguarda formulÃ¡rio
       const needsOpinion = msg.activityType === "FEZ";
       for (let i = 0; i < 30; i++) {
         await new Promise(r => setTimeout(r, 500));
@@ -2150,7 +2162,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         if (res?.[0]?.result) break;
       }
 
-      // 5. Preenche título
+      // 5. Preenche tÃ­tulo
       await chrome.scripting.executeScript({
         target: { tabId },
         func: (title) => {
@@ -2160,40 +2172,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         args: [activityTitle]
       });
 
-      // 6. Função auxiliar: insere texto no CodeMirror do EasyMDE
+      // 6. FunÃ§Ã£o auxiliar: insere texto no CodeMirror do EasyMDE
       async function pasteIntoEditor(selector, text) {
         await chrome.scripting.executeScript({
           target: { tabId },
           world: "MAIN",
-          func: (sel, content) => {           // content é o texto recebido via args
+          func: (sel, content) => {           // content Ã© o texto recebido via args
             const cmEl = document.querySelector(sel);
             if (!cmEl?.CodeMirror) return false;
             const cm = cmEl.CodeMirror;
             cm.focus();
-            cm.setValue(content);             // usa content, não text
+            cm.setValue(content);             // usa content, nÃ£o text
 
             // Sincroniza o textarea oculto do EasyMDE
             const hackeditor = cmEl.closest(".hackeditor");
             if (hackeditor) {
               const ta = hackeditor.querySelector("textarea.markdownEditor-source");
               if (ta) {
-                ta.value = content;           // usa content, não text
+                ta.value = content;           // usa content, nÃ£o text
                 ta.dispatchEvent(new Event("input",  { bubbles: true }));
                 ta.dispatchEvent(new Event("change", { bubbles: true }));
               }
             }
             return true;
           },
-          args: [selector, text]             // text do escopo externo → vira content no func
+          args: [selector, text]             // text do escopo externo â†’ vira content no func
         });
         await new Promise(r => setTimeout(r, 400));
       }
 
-      // Conteúdo → sempre #text .CodeMirror (FEZ também usa #text para conteúdo)
+      // ConteÃºdo â†’ sempre #text .CodeMirror (FEZ tambÃ©m usa #text para conteÃºdo)
       const contentSelector = "#text .CodeMirror";
       await pasteIntoEditor(contentSelector, msg.content);
 
-      // Opinião (somente FEZ)
+      // OpiniÃ£o (somente FEZ)
       if (needsOpinion && msg.opinion) {
         await pasteIntoEditor("#opinion .CodeMirror", msg.opinion);
       }
@@ -2205,7 +2217,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: () => { document.querySelector("#submitTask")?.click(); }
       });
 
-      // 8. Re-save na página de edição para garantir renderização do markdown
+      // 8. Re-save na pÃ¡gina de ediÃ§Ã£o para garantir renderizaÃ§Ã£o do markdown
       await resaveAfterCreate(tabId, msg.courseId, section.id, activityTitle);
 
       await UsageReport.queueFeatureUsageLog("activity_published", "activity_published", msg, {
@@ -2225,7 +2237,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   return true;
 });
 
-// ---------- Exercícios: criar atividade ----------
+// ---------- ExercÃ­cios: criar atividade ----------
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
   if (msg?.type !== "ALURA_REVISOR_CREATE_EXERCICIO") return;
@@ -2241,7 +2253,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       let sections = [];
       for (let attempt = 0; attempt < 12; attempt++) {
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 400));
         const res = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => {
@@ -2254,13 +2266,13 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
 
       const section = sections[lessonNum - 1];
-      if (!section?.id) { sendResponse({ ok: false, error: `Seção Aula ${lessonNum} não encontrada (total: ${sections.length}).` }); return; }
+      if (!section?.id) { sendResponse({ ok: false, error: `SeÃ§Ã£o Aula ${lessonNum} nÃ£o encontrada (total: ${sections.length}).` }); return; }
 
       const createUrl = `${baseUrl}/admin/course/v2/${courseId}/section/${section.id}/task/create`;
       await chrome.tabs.update(tabId, { url: createUrl });
 
       for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 250));
         const res = await chrome.scripting.executeScript({ target: { tabId }, func: () => !!document.querySelector("#chooseTask") });
         if (res?.[0]?.result) break;
       }
@@ -2271,9 +2283,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         world: "MAIN",
         func: (enumVal) => {
           const opt = document.querySelector(`#chooseTask option[data-task-enum="${enumVal}"]`);
-          if (!opt) return { ok: false, error: `option[data-task-enum="${enumVal}"] não achado em #chooseTask` };
+          if (!opt) return { ok: false, error: `option[data-task-enum="${enumVal}"] nÃ£o achado em #chooseTask` };
           const sel = document.getElementById("chooseTask");
-          if (!sel) return { ok: false, error: "#chooseTask não encontrado" };
+          if (!sel) return { ok: false, error: "#chooseTask nÃ£o encontrado" };
 
           // Marca a option, ajusta selectedIndex e value
           [...sel.options].forEach(o => o.selected = false);
@@ -2293,7 +2305,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       if (!selected?.[0]?.result?.ok) { sendResponse({ ok: false, error: selected?.[0]?.result?.error || "Erro ao selecionar tipo" }); return; }
 
       for (let i = 0; i < 30; i++) {
-        await new Promise(r => setTimeout(r, 500));
+        await new Promise(r => setTimeout(r, 250));
         const res = await chrome.scripting.executeScript({
           target: { tabId },
           func: () => !!(document.getElementById("task.title") || document.querySelector('input[name="title"]'))
@@ -2303,7 +2315,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
 
       // Aguarda o CodeMirror do enunciado inicializar
       for (let i = 0; i < 20; i++) {
-        await new Promise(r => setTimeout(r, 150));
+        await new Promise(r => setTimeout(r, 75));
         const res = await chrome.scripting.executeScript({
           target: { tabId },
           world: "MAIN",
@@ -2398,7 +2410,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         },
         args: [exercicio.enunciado || ""]
       });
-      await new Promise(r => setTimeout(r, 400));
+      await new Promise(r => setTimeout(r, 200));
 
       let feedbackDebug = null;
       if (exercicio.tipo !== "ordenar" && exercicio.alts?.length) {
@@ -2462,7 +2474,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           },
           args: [exercicio.alts, exercicio.correctAlt || ""]
         });
-        await new Promise(r => setTimeout(r, 600));
+        await new Promise(r => setTimeout(r, 100));
       }
 
       if (exercicio.tipo === "ordenar" && exercicio.blocks?.length) {
@@ -2477,7 +2489,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               return !!btn;
             }
           });
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 100));
         }
 
         // Preenche blocks[N].text e marca blocks[N].partOfSolution em todos
@@ -2529,7 +2541,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           },
           args: [exercicio.blocks]
         });
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 200));
 
         // Preenche feedback (Resposta correta / Resposta incorreta)
         const feedbackFillRes = await chrome.scripting.executeScript({
@@ -2549,7 +2561,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             function fillCM(cmEl, text) {
               if (!cmEl?.CodeMirror) return false;
               const cm = cmEl.CodeMirror;
-              // Força foco real no input interno para ativar estado CodeMirror-focused
+              // ForÃ§a foco real no input interno para ativar estado CodeMirror-focused
               cm.focus();
               try {
                 const input = cm.getInputField ? cm.getInputField() : (cm.display?.input?.getField?.() || cm.display?.input?.textarea);
@@ -2645,19 +2657,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           ...(feedbackDebug || {}),
           readback: feedbackReadRes?.[0]?.result || null
         };
-        await new Promise(r => setTimeout(r, 400));
+        await new Promise(r => setTimeout(r, 200));
       }
 
-      // Múltipla/Única escolha: clica "Adicionar alternativa" N vezes, preenche e marca a correta
+      // MÃºltipla/Ãšnica escolha: clica "Adicionar alternativa" N vezes, preenche e marca a correta
       if (exercicio.tipo === "multipla" && exercicio.alts?.length) {
-        // Espera o botão "Adicionar alternativa" aparecer
+        // Espera o botÃ£o "Adicionar alternativa" aparecer
         for (let i = 0; i < 15; i++) {
           const r = await chrome.scripting.executeScript({
             target: { tabId },
             func: () => !!document.querySelector('.add-alternative')
           });
           if (r?.[0]?.result) break;
-          await new Promise(r => setTimeout(r, 150));
+          await new Promise(r => setTimeout(r, 75));
         }
         // Clica "Adicionar alternativa" via jQuery (mesmo contexto dos handlers da Alura)
         const targetCount = exercicio.alts.length;
@@ -2687,9 +2699,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
               return btn ? "native" : "none";
             }
           });
-          await new Promise(r => setTimeout(r, 500));
+          await new Promise(r => setTimeout(r, 100));
         }
-        await new Promise(r => setTimeout(r, 200));
+        await new Promise(r => setTimeout(r, 50));
 
         // Preenche texto + opinion de cada alternativa e marca a correta
         await chrome.scripting.executeScript({
@@ -2748,7 +2760,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           },
           args: [exercicio.alts, exercicio.correctAlt]
         });
-        await new Promise(r => setTimeout(r, 800));
+        await new Promise(r => setTimeout(r, 400));
       }
 
       await chrome.scripting.executeScript({
@@ -2780,13 +2792,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         },
         args: [exercicio.respostaCorreta || "", exercicio.respostaIncorreta || ""]
       });
-      await new Promise(r => setTimeout(r, 1000));
+      await new Promise(r => setTimeout(r, 500));
 
       await chrome.scripting.executeScript({
         target: { tabId },
         func: () => { document.querySelector("#submitTask")?.click(); }
       });
-      await new Promise(r => setTimeout(r, 2500));
+
+      // Re-save para garantir renderizaÃ§Ã£o do markdown
+      await resaveAfterCreate(tabId, courseId, section.id, exercicio.questNome);
+
       await UsageReport.queueFeatureUsageLog("exercise_created", "exercise_created", msg, {
         lessonNum,
         exerciseType: exercicio?.tipo || "",

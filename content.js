@@ -1362,7 +1362,7 @@
               </ul>
             </div>`;
         } else {
-          tecnicoDiv.innerHTML = `<div style="padding:8px 12px; border-radius:8px; background:#f0fff5; border:1px solid #00c86f; font-size:13px; font-weight:600; color:#007a42;">\u2705 Regras do Curso T\u00e9cnico OK</div>`;
+          tecnicoDiv.innerHTML = `<div style="padding:8px 12px; border-radius:8px; background:#f0fff5; border:1px solid #00c86f; font-size:13px; font-weight:600; color:#007a42;">\u2705 Regras OK</div>`;
         }
 
         content.appendChild(tecnicoDiv);
@@ -1685,7 +1685,7 @@
     if (title.includes("compartilhe seu projeto")) return "compartilheProjeto";
     if (title.includes("videos para sp") || title.includes("vídeos para sp")) return "videosParaSP";
     if (title.includes("glossário") || title.includes("glossario")) return "glossario";
-    if (title.includes("o que aprendemos"))      return "oQueAprendemos";
+    if (title.includes("o que vamos aprender"))      return "oQueAprendemos";
     if (title.includes("conclusão") || title.includes("conclusao")) return "conclusao";
     if (title.includes("aprofundamento"))        return "aprofundamento";
     if (type === "Vídeo")                        return "video";
@@ -1769,10 +1769,10 @@
 
     const errors = [];
     if (isFirst && learnedCount !== 1) {
-      errors.push(`${learnedCount === 0 ? "Sem atividade" : learnedCount + " atividades"} "O que aprendemos" — deve ter exatamente 1 na primeira aula.`);
+      errors.push(`${learnedCount === 0 ? "Sem atividade" : learnedCount + " atividades"} "O que vamos aprender" — deve ter exatamente 1 na primeira aula.`);
     }
     if (!isFirst && learnedCount > 0) {
-      errors.push('"O que aprendemos" deve aparecer apenas na primeira aula.');
+      errors.push('"O que vamos aprender" deve aparecer apenas na primeira aula.');
     }
     if (videoCount !== 1) {
       errors.push(`${videoCount} v\u00eddeo(s) principal(is) — deve ter exatamente 1.`);
@@ -1884,10 +1884,10 @@
       const isLast    = si === totalSections - 1;
 
       if (isFirst && learnedCount !== 1) {
-        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${learnedCount === 0 ? "sem atividade" : learnedCount + " atividades"} "O que aprendemos" — deve ter exatamente 1 na primeira aula.`);
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${learnedCount === 0 ? "sem atividade" : learnedCount + " atividades"} "O que vamos aprender" — deve ter exatamente 1 na primeira aula.`);
       }
       if (!isFirst && learnedCount > 0) {
-        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": "O que aprendemos" deve aparecer apenas na primeira aula.`);
+        state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": "O que vamos aprender" deve aparecer apenas na primeira aula.`);
       }
       if (videoCount !== 1) {
         state.issues.tecnicoRules.push(`Se\u00e7\u00e3o "${section.title}": ${videoCount} v\u00eddeo(s) principal(is) — deve ter exatamente 1.`);
@@ -2292,9 +2292,9 @@
         for (const section of sections) {
           md += `### Aula — ${section.title}\n\n`;
           for (const task of section.tasks || []) {
-            const isOqueAprendemos = task.title?.toLowerCase().includes("o que aprendemos");
+            const isOqueAprendemos = task.title?.toLowerCase().includes("o que vamos aprender");
             const typeLabel = task.type === "Vídeo" ? "video"
-              : isOqueAprendemos ? "O que aprendemos"
+              : isOqueAprendemos ? "O que vamos aprender"
               : task.type === "Texto" ? "Texto explicativo"
               : "Atividade";
 
@@ -2304,7 +2304,7 @@
               md += task.transcriptionText
                 ? `${task.transcriptionText}\n\n`
                 : `_Sem transcrição_\n\n`;
-            } else if (typeLabel === "O que aprendemos" || typeLabel === "Texto explicativo") {
+            } else if (typeLabel === "O que vamos aprender" || typeLabel === "Texto explicativo") {
               const txt = htmlToText(task.htmlContents?.[0] || "");
               md += txt ? `${txt}\n\n` : `_Sem conteúdo_\n\n`;
             } else {
@@ -2950,7 +2950,7 @@
   }
 
   // Determina o dataTag de HQ_EXPLANATION com base no título:
-  // Se o título for uma variante de "O que aprendemos?" / "¿Qué aprendimos?" → WHAT_WE_LEARNED
+  // Se o título for uma variante de "O que vamos aprender?" / "¿Qué aprendimos?" → WHAT_WE_LEARNED
   // Caso contrário → COMPLEMENTARY_INFORMATION
   function _hqDataTag(title) {
     if (/qu[eé]\s+aprendimos|que\s+aprendemos|o\s+que\s+aprendemos/i.test(title || "")) return "WHAT_WE_LEARNED";
