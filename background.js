@@ -308,6 +308,51 @@ async function resaveAfterCreate(tabId, courseId, sectionId, activityTitle) {
   await new Promise(r => setTimeout(r, 400));
   await chrome.scripting.executeScript({
     target: { tabId },
+    world: "MAIN",
+    func: () => {
+      const fire = (el) => {
+        if (!el) return;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        el.dispatchEvent(new Event("change", { bubbles: true }));
+        el.dispatchEvent(new Event("blur", { bubbles: true }));
+      };
+      const setNativeValue = (el, value) => {
+        if (!el) return;
+        const proto = el instanceof HTMLTextAreaElement
+          ? HTMLTextAreaElement.prototype
+          : el instanceof HTMLInputElement
+            ? HTMLInputElement.prototype
+            : null;
+        const setter = proto && Object.getOwnPropertyDescriptor(proto, "value")?.set;
+        if (setter) setter.call(el, value);
+        else el.value = value;
+        fire(el);
+      };
+
+      let synced = 0;
+      for (const cmEl of document.querySelectorAll(".CodeMirror")) {
+        const cm = cmEl.CodeMirror;
+        if (!cm) continue;
+        const value = cm.getValue();
+        cm.focus();
+        cm.setValue(value);
+        cm.save();
+
+        const input = cm.getInputField?.() || cm.display?.input?.getField?.() || cm.display?.input?.textarea;
+        fire(input);
+        fire(cm.getWrapperElement?.() || cmEl);
+
+        const hackeditor = cmEl.closest(".hackeditor") || cmEl.closest(".markdownEditor");
+        const ta = hackeditor?.querySelector("textarea.markdownEditor-source");
+        if (ta) setNativeValue(ta, value);
+        synced++;
+      }
+      return { synced };
+    },
+  }).catch(() => null);
+  await new Promise(r => setTimeout(r, 300));
+  await chrome.scripting.executeScript({
+    target: { tabId },
     func: () => { document.querySelector("#submitTask")?.click(); },
   });
   await new Promise(r => setTimeout(r, 2000));
@@ -1819,7 +1864,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         target: { tabId },
         func: () => {
           const el = document.getElementById("task.title") || document.querySelector('input[name="title"]');
-          if (el) { el.value = "FaÃ§a como eu fiz"; el.dispatchEvent(new Event("input", { bubbles: true })); }
+          if (el) { el.value = "Fa\u00e7a como eu fiz"; el.dispatchEvent(new Event("input", { bubbles: true })); }
         }
       });
 
@@ -1829,6 +1874,24 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           target: { tabId },
           world: "MAIN",
           func: (sel, text) => {
+            const fire = (el) => {
+              if (!el) return;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              el.dispatchEvent(new Event("blur", { bubbles: true }));
+            };
+            const setNativeValue = (el, value) => {
+              if (!el) return;
+              const proto = el instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : el instanceof HTMLInputElement
+                  ? HTMLInputElement.prototype
+                  : null;
+              const setter = proto && Object.getOwnPropertyDescriptor(proto, "value")?.set;
+              if (setter) setter.call(el, value);
+              else el.value = value;
+              fire(el);
+            };
             const cmEl = document.querySelector(sel);
             if (!cmEl?.CodeMirror) return false;
             const cm = cmEl.CodeMirror;
@@ -1836,16 +1899,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             // 1. Seta o conteÃºdo diretamente via API do CodeMirror
             cm.focus();
             cm.setValue(text);
+            cm.save();
+            const input = cm.getInputField?.() || cm.display?.input?.getField?.() || cm.display?.input?.textarea;
+            fire(input);
+            fire(cm.getWrapperElement?.() || cmEl);
 
             // 2. Sincroniza o textarea oculto do EasyMDE (fora do .CodeMirror)
             const hackeditor = cmEl.closest(".hackeditor");
             if (hackeditor) {
               const ta = hackeditor.querySelector("textarea.markdownEditor-source");
-              if (ta) {
-                ta.value = text;
-                ta.dispatchEvent(new Event("input",  { bubbles: true }));
-                ta.dispatchEvent(new Event("change", { bubbles: true }));
-              }
+              if (ta) setNativeValue(ta, text);
             }
             return true;
           },
@@ -1870,7 +1933,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       });
 
       // 8. Re-save na pÃ¡gina de ediÃ§Ã£o para garantir renderizaÃ§Ã£o do markdown
-      await resaveAfterCreate(tabId, msg.courseId, section.id, "FaÃ§a como eu fiz");
+      await resaveAfterCreate(tabId, msg.courseId, section.id, "Fa\u00e7a como eu fiz");
 
       await UsageReport.queueFeatureUsageLog("activity_published", "do_after_me_published", msg, {
         lessonNum: msg.lessonNum,
@@ -2083,7 +2146,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       // Mapeamento de tipo â†’ data-tag e tÃ­tulo padrÃ£o
       const TYPE_MAP = {
         PREP:     { dataTag: "SETUP_EXPLANATION",        defaultTitle: "Preparando o ambiente" },
-        FEZ:      { dataTag: "DO_AFTER_ME",              defaultTitle: "FaÃ§a como eu fiz" },
+        FEZ:      { dataTag: "DO_AFTER_ME",              defaultTitle: "Fa\u00e7a como eu fiz" },
         PSM:      { dataTag: "COMPLEMENTARY_INFORMATION",defaultTitle: null },
         GLOSSARIO:{ dataTag: "COMPLEMENTARY_INFORMATION",defaultTitle: null },
       };
@@ -2177,22 +2240,40 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         await chrome.scripting.executeScript({
           target: { tabId },
           world: "MAIN",
-          func: (sel, content) => {           // content Ã© o texto recebido via args
+          func: (sel, content) => {           // content é o texto recebido via args
+            const fire = (el) => {
+              if (!el) return;
+              el.dispatchEvent(new Event("input", { bubbles: true }));
+              el.dispatchEvent(new Event("change", { bubbles: true }));
+              el.dispatchEvent(new Event("blur", { bubbles: true }));
+            };
+            const setNativeValue = (el, value) => {
+              if (!el) return;
+              const proto = el instanceof HTMLTextAreaElement
+                ? HTMLTextAreaElement.prototype
+                : el instanceof HTMLInputElement
+                  ? HTMLInputElement.prototype
+                  : null;
+              const setter = proto && Object.getOwnPropertyDescriptor(proto, "value")?.set;
+              if (setter) setter.call(el, value);
+              else el.value = value;
+              fire(el);
+            };
             const cmEl = document.querySelector(sel);
             if (!cmEl?.CodeMirror) return false;
             const cm = cmEl.CodeMirror;
             cm.focus();
-            cm.setValue(content);             // usa content, nÃ£o text
+            cm.setValue(content);             // usa content, não text
+            cm.save();
+            const input = cm.getInputField?.() || cm.display?.input?.getField?.() || cm.display?.input?.textarea;
+            fire(input);
+            fire(cm.getWrapperElement?.() || cmEl);
 
             // Sincroniza o textarea oculto do EasyMDE
             const hackeditor = cmEl.closest(".hackeditor");
             if (hackeditor) {
               const ta = hackeditor.querySelector("textarea.markdownEditor-source");
-              if (ta) {
-                ta.value = content;           // usa content, nÃ£o text
-                ta.dispatchEvent(new Event("input",  { bubbles: true }));
-                ta.dispatchEvent(new Event("change", { bubbles: true }));
-              }
+              if (ta) setNativeValue(ta, content);
             }
             return true;
           },

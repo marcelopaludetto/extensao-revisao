@@ -3203,7 +3203,15 @@ function renderAvalCards(parsed) {
   }
 
   // Card: Título
-  const titleValue = parsed.title;
+  let titleValue = parsed.title;
+  // Transform "**Avaliação final – Nome da unidade**" → "[BASE] – Nome da unidade"
+  titleValue = titleValue.replace(/\*{1,3}/g, ""); // remove asterisks
+  const dashMatch = titleValue.match(/^[^–—-]*\s*(–|—|-)\s*(.+)$/);
+  if (dashMatch) {
+    const dash = dashMatch[1];
+    const unidadeName = dashMatch[2];
+    titleValue = "[BASE] " + dash + " " + unidadeName;
+  }
   container.appendChild(makeCard("Título", titleValue, () =>
     avalSend({ type: "ALURA_REVISOR_FILL_ASSESSMENT", field: "title", value: titleValue })
   ));
