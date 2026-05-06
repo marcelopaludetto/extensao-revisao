@@ -2180,8 +2180,69 @@ const IMG_R2_PREFIX = "start-content";
 // Também reconhece o formato sem parênteses que o Word exporta: `![alt] aula1-FCF-09`
 // — nesse caso, resolve a extensão via mapa de stems (nome sem extensão → nome real)
 // vindo das imagens já subidas para o curso.
-const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)(\?.*)?$/i;
+const IMG_EXT_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)([?#].*)?$/i;
 const IMG_EXT_STRIP_RE = /\.(png|jpe?g|gif|webp|svg|bmp|avif)$/i;
+
+function escapeHtmlAttr(value) {
+  return String(value ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
+}
+
+function cleanImageAltText(alt) {
+  return String(alt ?? "")
+    .replace(/&quot;|&#34;|&#x22;/gi, "")
+    .replace(/["\u201c\u201d]/g, "");
+}
+
+function buildImageHtmlTag(src, alt = "") {
+  const safeSrc = escapeHtmlAttr(src);
+  const safeAlt = escapeHtmlAttr(cleanImageAltText(alt));
+  return `<img src="${safeSrc}" alt="${safeAlt}" width="100%" style="height: auto;">`;
+}
+
+function cleanImageToken(raw) {
+  let token = String(raw ?? "").trim();
+  if (token.startsWith("<") && token.endsWith(">")) {
+    token = token.slice(1, -1).trim();
+  }
+  return token;
+}
+
+function filenameFromImageToken(token) {
+  const cleanToken = cleanImageToken(token);
+  if (!cleanToken) return "";
+  const withoutQuery = cleanToken.split("?")[0].split("#")[0];
+  return withoutQuery.split(/[\\/]/).pop() || "";
+}
+
+function buildImageCdnUrl(courseId, filename) {
+  return `${IMG_BASE_URL}/${courseId}-imagens/${filename}`;
+}
+
+function resolveImageSrc(rawToken, courseId, stemMap) {
+  const token = cleanImageToken(rawToken);
+  if (!token) return "";
+
+  if (/^https?:\/\//i.test(token)) {
+    if (!IMG_EXT_RE.test(token)) return "";
+    if (token.startsWith(IMG_BASE_URL + "/")) return token;
+    const filename = filenameFromImageToken(token);
+    return filename ? buildImageCdnUrl(courseId, filename) : "";
+  }
+
+  const filename = filenameFromImageToken(token);
+  if (!filename) return "";
+
+  if (IMG_EXT_RE.test(filename)) {
+    return buildImageCdnUrl(courseId, filename);
+  }
+
+  const resolved = stemMap?.[filename] || stemMap?.[filename.replace(IMG_EXT_STRIP_RE, "")];
+  return resolved ? buildImageCdnUrl(courseId, resolved) : "";
+}
 
 function stemMapFromFilenames(filenames) {
   const map = {};
@@ -2200,10 +2261,10 @@ async function getImgStemMap(courseId) {
   return stemMapFromFilenames(r[key] || []);
 }
 
-function rewriteImageLinks(text, courseId, stemMap) {
+function rewriteImageLinksLegacy(text, courseId, stemMap) {
   if (!text || !courseId) return text;
 
-  // Caso 1: `![alt](url ou nome.ext)`
+  // Caso 1: `![alt](url ou nome.ext)` com parenteses.
   text = text.replace(/(!\[[^\]]*\]\()\s*([^)\s]+)\s*(\))/g, (m, pre, url, post) => {
     if (/^https?:\/\//i.test(url)) {
       if (!IMG_EXT_RE.test(url)) return m;
@@ -2241,10 +2302,36 @@ function rewriteImageLinks(text, courseId, stemMap) {
   return text;
 }
 
+function rewriteImageMarkdownAsHtml(text, courseId, stemMap) {
+  if (!text || !courseId) return text;
+
+  // Caso 1: `![alt](url ou nome.ext)`
+  text = text.replace(/!\[([^\]]*)\]\(\s*([^)]+?)\s*\)/g, (m, alt, token) => {
+    const src = resolveImageSrc(token, courseId, stemMap);
+    return src ? buildImageHtmlTag(src, alt) : m;
+  });
+
+  // Caso 2: `![alt]<espaco|quebra>arquivo.ext` sem parenteses.
+  // Captura ate a extensao para aceitar nomes com espaco sem engolir o resto do paragrafo.
+  text = text.replace(/!\[([^\]]*)\][ \t]*(?:\n[ \t]*)?([^\n]*?\.(?:png|jpe?g|gif|webp|svg|bmp|avif)(?:[?#][^ \t\n]*)?)/gi, (m, alt, token) => {
+    const src = resolveImageSrc(token, courseId, stemMap);
+    return src ? buildImageHtmlTag(src, alt) : m;
+  });
+
+  // Caso 3: `![alt]<espaco|quebra>arquivo` sem extensao.
+  // So substitui quando o stem existe no cache das imagens do curso.
+  text = text.replace(/!\[([^\]]*)\][ \t]*(?:\n[ \t]*)?([A-Za-z0-9][A-Za-z0-9_.\-]*)/g, (m, alt, token) => {
+    const src = resolveImageSrc(token, courseId, stemMap);
+    return src ? buildImageHtmlTag(src, alt) : m;
+  });
+
+  return text;
+}
+
 async function rewriteImagesDeepAsync(value, courseId) {
   const stemMap = await getImgStemMap(courseId);
   function walk(v) {
-    if (typeof v === "string") return rewriteImageLinks(v, courseId, stemMap);
+    if (typeof v === "string") return rewriteImageMarkdownAsHtml(v, courseId, stemMap);
     if (Array.isArray(v)) { for (let i = 0; i < v.length; i++) v[i] = walk(v[i]); return v; }
     if (v && typeof v === "object") {
       for (const k of Object.keys(v)) v[k] = walk(v[k]);
@@ -2258,7 +2345,7 @@ async function rewriteImagesDeepAsync(value, courseId) {
 // Mantém versão sync por compatibilidade (sem stemMap → só caso 1 com extensão)
 function rewriteImagesDeep(value, courseId) {
   if (!courseId) return value;
-  if (typeof value === "string") return rewriteImageLinks(value, courseId, null);
+  if (typeof value === "string") return rewriteImageMarkdownAsHtml(value, courseId, null);
   if (Array.isArray(value)) { for (let i = 0; i < value.length; i++) value[i] = rewriteImagesDeep(value[i], courseId); return value; }
   if (value && typeof value === "object") {
     for (const k of Object.keys(value)) value[k] = rewriteImagesDeep(value[k], courseId);

@@ -2344,38 +2344,45 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       await chrome.scripting.executeScript({
         target: { tabId },
         world: "MAIN",
-        func: (text) => {
-          const toHtml = (raw) => {
-            const src = String(raw || "");
-            const esc = (s) => s
-              .replace(/&/g, "&amp;")
-              .replace(/</g, "&lt;")
-              .replace(/>/g, "&gt;");
-            const lines = src.split("\n");
-            const out = [];
-            let i = 0;
-            while (i < lines.length) {
-              const line = lines[i].trimEnd();
+          func: (text) => {
+            const toHtml = (raw) => {
+              const src = String(raw || "");
+              const imgTags = [];
+              const withImgTokens = src.replace(/<img\b[^>]*>/gi, (tag) => {
+                const token = `@@ALURA_REVISOR_IMG_${imgTags.length}@@`;
+                imgTags.push(tag);
+                return token;
+              });
+              const esc = (s) => s
+                .replace(/&/g, "&amp;")
+                .replace(/</g, "&lt;")
+                .replace(/>/g, "&gt;");
+              const restoreImgs = (s) => s.replace(/@@ALURA_REVISOR_IMG_(\d+)@@/g, (_, i) => imgTags[+i] || "");
+              const lines = withImgTokens.split("\n");
+              const out = [];
+              let i = 0;
+              while (i < lines.length) {
+                const line = lines[i].trimEnd();
               if (!line.trim()) { i++; continue; }
               if (line.trimStart().startsWith(">")) {
                 const quote = [];
-                while (i < lines.length && lines[i].trimStart().startsWith(">")) {
-                  quote.push(lines[i].replace(/^\s*>\s?/, "").trimEnd());
+                  while (i < lines.length && lines[i].trimStart().startsWith(">")) {
+                    quote.push(lines[i].replace(/^\s*>\s?/, "").trimEnd());
+                    i++;
+                  }
+                  out.push(`<blockquote>\n<p>${restoreImgs(esc(quote.join("\n")).replace(/\n/g, "<br>"))}</p>\n</blockquote>`);
+                  continue;
+                }
+                const para = [];
+                while (i < lines.length && lines[i].trim()) {
+                if (lines[i].trimStart().startsWith(">")) break;
+                  para.push(lines[i].trimEnd());
                   i++;
                 }
-                out.push(`<blockquote>\n<p>${esc(quote.join("\n")).replace(/\n/g, "<br>")}</p>\n</blockquote>`);
-                continue;
+                out.push(`<p>${restoreImgs(esc(para.join("\n")).replace(/\n/g, "<br>"))}</p>`);
               }
-              const para = [];
-              while (i < lines.length && lines[i].trim()) {
-                if (lines[i].trimStart().startsWith(">")) break;
-                para.push(lines[i].trimEnd());
-                i++;
-              }
-              out.push(`<p>${esc(para.join("\n")).replace(/\n/g, "<br>")}</p>`);
-            }
-            return out.join("\n");
-          };
+              return out.join("\n");
+            };
           const cmEl = document.querySelector("#text .CodeMirror") || document.querySelector("[id*='statement'] .CodeMirror") || document.querySelector(".CodeMirror");
           if (cmEl?.CodeMirror) {
             const cm = cmEl.CodeMirror;
@@ -2420,13 +2427,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           func: (alts, correctAlt) => {
             const toHtml = (raw) => {
               const text = String(raw || "");
+              const imgTags = [];
+              const withImgTokens = text.replace(/<img\b[^>]*>/gi, (tag) => {
+                const token = `@@ALURA_REVISOR_IMG_${imgTags.length}@@`;
+                imgTags.push(tag);
+                return token;
+              });
               const esc = (s) => s
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
-              const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+              const restoreImgs = (s) => s.replace(/@@ALURA_REVISOR_IMG_(\d+)@@/g, (_, i) => imgTags[+i] || "");
+              const parts = withImgTokens.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
               if (!parts.length) return "";
-              return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+              return parts.map(p => `<p>${restoreImgs(esc(p).replace(/\n/g, "<br>"))}</p>`).join("\n");
             };
             const setField = (sel, value) => {
               const el = document.querySelector(sel);
@@ -2550,13 +2564,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
           func: (correct, incorrect) => {
             const toHtml = (raw) => {
               const text = String(raw || "");
+              const imgTags = [];
+              const withImgTokens = text.replace(/<img\b[^>]*>/gi, (tag) => {
+                const token = `@@ALURA_REVISOR_IMG_${imgTags.length}@@`;
+                imgTags.push(tag);
+                return token;
+              });
               const esc = (s) => s
                 .replace(/&/g, "&amp;")
                 .replace(/</g, "&lt;")
                 .replace(/>/g, "&gt;");
-              const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+              const restoreImgs = (s) => s.replace(/@@ALURA_REVISOR_IMG_(\d+)@@/g, (_, i) => imgTags[+i] || "");
+              const parts = withImgTokens.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
               if (!parts.length) return "";
-              return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+              return parts.map(p => `<p>${restoreImgs(esc(p).replace(/\n/g, "<br>"))}</p>`).join("\n");
             };
             function fillCM(cmEl, text) {
               if (!cmEl?.CodeMirror) return false;
@@ -2711,10 +2732,17 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
             const letters = ["A","B","C","D","E"];
             const toHtml = (raw) => {
               const text = String(raw || "");
+              const imgTags = [];
+              const withImgTokens = text.replace(/<img\b[^>]*>/gi, (tag) => {
+                const token = `@@ALURA_REVISOR_IMG_${imgTags.length}@@`;
+                imgTags.push(tag);
+                return token;
+              });
               const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-              const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+              const restoreImgs = (s) => s.replace(/@@ALURA_REVISOR_IMG_(\d+)@@/g, (_, i) => imgTags[+i] || "");
+              const parts = withImgTokens.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
               if (!parts.length) return "";
-              return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+              return parts.map(p => `<p>${restoreImgs(esc(p).replace(/\n/g, "<br>"))}</p>`).join("\n");
             };
 
             function fillByName(textareaName, hiddenName, text) {
@@ -2769,13 +2797,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         func: (correct, incorrect) => {
           const toHtml = (raw) => {
             const text = String(raw || "");
+            const imgTags = [];
+            const withImgTokens = text.replace(/<img\b[^>]*>/gi, (tag) => {
+              const token = `@@ALURA_REVISOR_IMG_${imgTags.length}@@`;
+              imgTags.push(tag);
+              return token;
+            });
             const esc = (s) => s
               .replace(/&/g, "&amp;")
               .replace(/</g, "&lt;")
               .replace(/>/g, "&gt;");
-            const parts = text.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
+            const restoreImgs = (s) => s.replace(/@@ALURA_REVISOR_IMG_(\d+)@@/g, (_, i) => imgTags[+i] || "");
+            const parts = withImgTokens.split(/\n{2,}/).map(p => p.trim()).filter(Boolean);
             if (!parts.length) return "";
-            return parts.map(p => `<p>${esc(p).replace(/\n/g, "<br>")}</p>`).join("\n");
+            return parts.map(p => `<p>${restoreImgs(esc(p).replace(/\n/g, "<br>"))}</p>`).join("\n");
           };
           const setVal = (sel, v) => {
             const el = document.querySelector(sel);
