@@ -64,7 +64,7 @@ const ACTIVITY_ORDERS = {
     { label: "Hora do desafio" },
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que vamos aprender (em vídeo)" },
+    { label: "O que aprendemos?" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   vscode: [
@@ -81,7 +81,7 @@ const ACTIVITY_ORDERS = {
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Videos para SP", note: "aula 1 de código, aula 2 de código", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que vamos aprender (em vídeo)" },
+    { label: "O que aprendemos?" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   figma: [
@@ -96,7 +96,7 @@ const ACTIVITY_ORDERS = {
     { label: "Hora do desafio" },
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que vamos aprender (em vídeo)" },
+    { label: "O que aprendemos?" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   robotica: [
@@ -112,7 +112,7 @@ const ACTIVITY_ORDERS = {
     { label: "Hora do desafio" },
     { label: "Compartilhe seu projeto", note: "quando houver entrega", optional: true },
     { label: "Glossário", note: "caso tenha", optional: true },
-    { label: "O que vamos aprender (em vídeo)" },
+    { label: "O que aprendemos?" },
     { label: "Vídeo X.X - Conclusão", note: "apenas no último vídeo", optional: true },
   ],
   tecnico: [
@@ -207,7 +207,7 @@ function renderActivityChecklist(platform) {
 
   const items = ACTIVITY_ORDERS[platform];
   const fragment = document.createDocumentFragment();
-  const isFixedOrder = platform === "tecnico" || FORMACAO_DOCENTE_PLATFORMS.includes(platform);
+  const isFixedOrder = true;
   let stepNumber = 1;
 
   items.forEach((item, i) => {
@@ -242,16 +242,6 @@ function renderActivityChecklist(platform) {
     fragment.appendChild(div);
   });
 
-  if (!isFixedOrder) {
-    const resetBtn = document.createElement("button");
-    resetBtn.className = "act-reset-btn";
-    resetBtn.textContent = "Limpar";
-    resetBtn.addEventListener("click", () => {
-      container.querySelectorAll("input[type='checkbox']").forEach((cb) => (cb.checked = false));
-    });
-    fragment.appendChild(resetBtn);
-  }
-
   container.innerHTML = "";
   container.appendChild(fragment);
 }
@@ -262,6 +252,55 @@ if (platformSelect) {
     renderActivityChecklist(platformSelect.value);
   });
 }
+
+// ---------- Custom select visual ----------
+const csWrapper = document.getElementById("platform-select-wrapper");
+const csTrigger = document.getElementById("platform-select-trigger");
+const csText    = document.getElementById("platform-select-text");
+const csOptions = document.getElementById("platform-select-options");
+
+function csRebuild() {
+  if (!csOptions || !platformSelect) return;
+  csOptions.innerHTML = "";
+  [...platformSelect.options].forEach(opt => {
+    const div = document.createElement("div");
+    div.className = "custom-select-option" + (opt.value === platformSelect.value ? " selected" : "");
+    div.dataset.value = opt.value;
+    div.textContent = opt.label || opt.text;
+    div.addEventListener("click", () => {
+      if (platformSelect.disabled) return;
+      platformSelect.value = opt.value;
+      platformSelect.dispatchEvent(new Event("change"));
+      csClose();
+      csUpdateDisplay();
+    });
+    csOptions.appendChild(div);
+  });
+  csUpdateDisplay();
+}
+
+function csUpdateDisplay() {
+  if (!csText || !platformSelect) return;
+  const sel = platformSelect.options[platformSelect.selectedIndex];
+  csText.textContent = sel?.label || sel?.text || "Selecione a plataforma…";
+  csWrapper?.classList.toggle("disabled", !!platformSelect.disabled);
+  csOptions?.querySelectorAll(".custom-select-option").forEach(d => {
+    d.classList.toggle("selected", d.dataset.value === platformSelect.value);
+  });
+}
+
+function csClose() { csWrapper?.classList.remove("open"); }
+
+if (csTrigger) {
+  csTrigger.addEventListener("click", () => {
+    if (platformSelect?.disabled) return;
+    csWrapper.classList.toggle("open");
+  });
+}
+document.addEventListener("click", e => {
+  if (csWrapper && !csWrapper.contains(e.target)) csClose();
+});
+// ---------- /Custom select ----------
 
 function fillPlatformOptions(options, selectedValue = "") {
   if (!platformSelect) return;
@@ -276,6 +315,7 @@ function fillPlatformOptions(options, selectedValue = "") {
 
   const values = options.map(option => option.value);
   platformSelect.value = values.includes(selectedValue) ? selectedValue : options[0]?.value || "";
+  csRebuild();
 }
 
 function syncPlatformWithProductType() {
@@ -292,6 +332,7 @@ function syncPlatformWithProductType() {
     fillPlatformOptions(PLATFORM_OPTIONS.default, platformSelect.value);
     platformSelect.disabled = false;
   }
+  csUpdateDisplay();
 
   renderActivityChecklist(platformSelect.value);
 }

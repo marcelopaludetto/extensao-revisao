@@ -1547,6 +1547,20 @@ function waitForTabComplete(tabId, timeoutMs = 15000) {
   });
 }
 
+// Helper: aguarda apenas o início da navegação após form submit (muito mais rápido)
+function waitForTabNavStart(tabId, timeoutMs = 4000) {
+  return new Promise(resolve => {
+    const timer = setTimeout(resolve, timeoutMs);
+    chrome.tabs.onUpdated.addListener(function listener(id, info) {
+      if (id === tabId && info.status === "loading") {
+        clearTimeout(timer);
+        chrome.tabs.onUpdated.removeListener(listener);
+        resolve();
+      }
+    });
+  });
+}
+
 // Handler 1: Busca tipo e subtipo de uma task no admin da Alura
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (!isValidSender(sender)) return;
@@ -1719,9 +1733,8 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
         return;
       }
 
-      // Aguarda o form POST recarregar a pÃ¡gina
-      await new Promise(r => setTimeout(r, 500));
-      await waitForTabComplete(tabId, 10000);
+      // Aguarda o form POST ser processado (navegação iniciada = servidor confirmou)
+      await waitForTabNavStart(tabId, 4000);
       await UsageReport.queueFeatureUsageLog("activity_order_fixed", "section_tasks_reordered", msg, {
         sectionId: msg.sectionId,
         orderedTaskCount: Array.isArray(msg.orderedTaskIds) ? msg.orderedTaskIds.length : 0,

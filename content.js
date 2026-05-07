@@ -1095,6 +1095,10 @@
           padding:9px 18px; border:0; border-radius:8px; cursor:pointer;
           background:#00c86f; color:#fff; font-size:14px; font-weight:600;
         ">Baixar relatório</button>
+        ${state.courseId && state.platform ? `<button id="aluraRevisorAutoOrder" style="
+          padding:9px 18px; border:0; border-radius:8px; cursor:pointer;
+          background:#7b1fa2; color:#fff; font-size:14px; font-weight:600;
+        ">Ordenar tudo ›</button>` : ""}
         ${state.courseId ? `<button id="aluraRevisorNextStep" style="
           padding:9px 18px; border:0; border-radius:8px; cursor:pointer;
           background:#1565c0; color:#fff; font-size:14px; font-weight:600;
@@ -1166,6 +1170,121 @@
         overlay.remove();
         await showSectionTasksStep(state.courseId, 0, null, state.platform || null);
       });
+    }
+
+    const autoOrderBtn = modal.querySelector("#aluraRevisorAutoOrder");
+    if (autoOrderBtn) {
+      autoOrderBtn.addEventListener("click", async () => {
+        autoOrderBtn.disabled = true;
+        autoOrderBtn.textContent = "Carregando...";
+        overlay.remove();
+        await autoOrderAllSections(state.courseId, null, state.platform || null);
+      });
+    }
+  }
+
+  async function autoOrderAllSections(courseId, sections = null, platform = null) {
+    const { modal, overlay } = createOverlayModal("680px");
+    modal.innerHTML = `
+      <div style="padding-bottom:16px; border-bottom:2px solid #f0f0f0; margin-bottom:4px;">
+        <h2 style="margin:0; font-size:18px; font-weight:700; color:#1c1c1c;">Ordenação Automática</h2>
+      </div>
+      <div id="aluraRevisorAutoContent" style="margin-top:12px; font-size:15px; line-height:1.6; color:#333;">
+        <p style="color:#888;">Carregando seções...</p>
+      </div>
+      <div style="display:flex; justify-content:flex-end; gap:10px; margin-top:20px;">
+        <button id="aluraRevisorClose" style="padding:9px 18px; border:0; border-radius:8px; cursor:pointer; background:#1c1c1c; color:#fff; font-size:14px; font-weight:600;">Fechar</button>
+      </div>
+    `;
+    document.getElementById("aluraRevisorClose").onclick = () => overlay.remove();
+
+    const content = modal.querySelector("#aluraRevisorAutoContent");
+
+    try {
+      if (!sections) {
+        sections = (await getAdminSections(courseId)).filter(s => s.active);
+      }
+
+      if (sections.length === 0) {
+        content.innerHTML = `<p style="color:#c00;">Nenhuma seção ativa encontrada.</p>`;
+        return;
+      }
+
+      const results = [];
+
+      for (let i = 0; i < sections.length; i++) {
+        const section = sections[i];
+        content.innerHTML = `<p style="color:#888; margin:0;">Verificando <strong>${i + 1}/${sections.length}</strong>: ${section.title}…</p>`;
+
+        try {
+          const { tasks } = await getAdminSectionTasks(courseId, section.id);
+
+          if (!platform || tasks.length === 0) {
+            results.push({ title: section.title, status: "skip" });
+            continue;
+          }
+
+          const context = { sectionIndex: i, totalSections: sections.length, sectionTitle: section.title };
+          const orderErrors = validateSectionOrder(tasks, platform, context);
+
+          if (orderErrors.length === 0) {
+            results.push({ title: section.title, status: "ok" });
+            continue;
+          }
+
+          const correctTasks = computeCorrectOrder(tasks, platform, context);
+          const orderedIds = correctTasks
+            .map(t => t.editUrl?.match(/\/task\/edit\/(\d+)/)?.[1])
+            .filter(Boolean);
+
+          const resp = await new Promise(resolve =>
+            chrome.runtime.sendMessage({
+              type: "ALURA_REVISOR_REORDER_SECTION_TASKS",
+              courseId,
+              sectionId: section.id,
+              orderedTaskIds: orderedIds
+            }, resolve)
+          );
+
+          if (resp?.ok) {
+            results.push({ title: section.title, status: "fixed", errors: orderErrors });
+          } else {
+            results.push({ title: section.title, status: "error", message: resp?.error || "Erro ao reordenar" });
+          }
+        } catch (e) {
+          results.push({ title: section.title, status: "error", message: e.message });
+        }
+      }
+
+      const nOk    = results.filter(r => r.status === "ok").length;
+      const nFixed = results.filter(r => r.status === "fixed").length;
+      const nError = results.filter(r => r.status === "error").length;
+
+      const rows = results.map(r => {
+        const icons = { ok: "✅", fixed: "🔧", error: "❌", skip: "⏭️" };
+        const icon = icons[r.status] || "•";
+        let detail = "";
+        if (r.status === "ok")    detail = `<span style="color:#2e7d32;">Ordem correta</span>`;
+        if (r.status === "fixed") detail = `<span style="color:#1565c0;">Corrigida</span>`;
+        if (r.status === "error") detail = `<span style="color:#c62828;">${r.message}</span>`;
+        if (r.status === "skip")  detail = `<span style="color:#888;">Sem atividades ou plataforma</span>`;
+        return `
+          <div style="display:flex; align-items:flex-start; gap:8px; padding:6px 0; border-bottom:1px solid #f0f0f0; font-size:13px;">
+            <span style="flex-shrink:0; min-width:20px;">${icon}</span>
+            <div><strong>${r.title}</strong> — ${detail}</div>
+          </div>`;
+      }).join("");
+
+      content.innerHTML = `
+        <div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:14px; font-size:14px; font-weight:600;">
+          <span style="color:#2e7d32;">✅ ${nOk} correta${nOk !== 1 ? "s" : ""}</span>
+          <span style="color:#1565c0;">🔧 ${nFixed} corrigida${nFixed !== 1 ? "s" : ""}</span>
+          ${nError ? `<span style="color:#c62828;">❌ ${nError} com erro</span>` : ""}
+        </div>
+        ${rows}
+      `;
+    } catch (e) {
+      content.innerHTML = `<p style="color:#c00;">Erro: ${e.message}</p>`;
     }
   }
 
@@ -1685,7 +1804,7 @@
     if (title.includes("compartilhe seu projeto")) return "compartilheProjeto";
     if (title.includes("videos para sp") || title.includes("vídeos para sp")) return "videosParaSP";
     if (title.includes("glossário") || title.includes("glossario")) return "glossario";
-    if (title.includes("o que vamos aprender"))      return "oQueAprendemos";
+    if (title.includes("o que aprendemos"))           return "oQueAprendemos";
     if (title.includes("conclusão") || title.includes("conclusao")) return "conclusao";
     if (title.includes("aprofundamento"))        return "aprofundamento";
     if (type === "Vídeo")                        return "video";
