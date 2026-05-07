@@ -3518,6 +3518,7 @@ function parseExercDoc(rows) {
   let aulaTitle = "";
   let q = null;
   let collectingEnunciado = false;
+  let collectingBlocks = false;
   let currentAltLetter = null;
   let currentAltText = "";
   let inGabarito = false;
@@ -3569,6 +3570,7 @@ function parseExercDoc(rows) {
     exercises.push(q);
     q = null;
     collectingEnunciado = false;
+    collectingBlocks = false;
     currentAltLetter = null;
     currentAltText = "";
     inGabarito = false;
@@ -3590,8 +3592,10 @@ function parseExercDoc(rows) {
           aulaTitle = nextRow.text.trim();
           i++;
         }
+        continue;
       }
-      continue;
+      if (!q) continue;
+      // Aula style inside a question = doc formatting error; fall through to normal processing
     }
 
     const qMatch = s.match(/^Questão\s+(\d+)\s*[-–—]\s*(.+)$/i);
@@ -3623,6 +3627,7 @@ function parseExercDoc(rows) {
     if (style === "Blocos") {
       q.tipo = "ordenar";
       collectingEnunciado = false;
+      collectingBlocks = true;
       q.blocks.push(t);
       continue;
     }
@@ -3631,6 +3636,7 @@ function parseExercDoc(rows) {
     if (seqM) {
       q.sequenciaCorreta = seqM[1].trim();
       collectingEnunciado = false;
+      collectingBlocks = false;
       collectingFeedback = null;
       collectingAltOpinionLetter = null;
       // Se blocos ainda não foram detectados por estilo "Blocos", infere pelos
@@ -3643,6 +3649,11 @@ function parseExercDoc(rows) {
           q.blocks = q.enunciado.splice(q.enunciado.length - n, n);
         }
       }
+      continue;
+    }
+
+    if (collectingBlocks) {
+      q.blocks.push(t);
       continue;
     }
 
