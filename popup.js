@@ -3624,19 +3624,19 @@ function parseExercDoc(rows) {
     const t = normalizeLine(text);
     const s = stripStars(t);
 
-    if (style === "Aula") {
+    if (style === "Aula" || style === "Heading1") {
       if (/^Aula\s+\d+$/i.test(t)) {
         flushQuestion();
         aulaNum = parseInt(t.match(/\d+/)[0]);
         const nextRow = rows[i + 1];
-        if (nextRow && nextRow.style === "Aula") {
+        if (nextRow && (nextRow.style === "Aula" || nextRow.style === "Heading1")) {
           aulaTitle = nextRow.text.trim();
           i++;
         }
         continue;
       }
       if (!q) continue;
-      // Aula style inside a question = doc formatting error; fall through to normal processing
+      // Aula/Heading1 style inside a question = doc formatting error; fall through to normal processing
     }
 
     const qMatch = s.match(/^Questão\s+(\d+)\s*[-–—]\s*(.+)$/i);
