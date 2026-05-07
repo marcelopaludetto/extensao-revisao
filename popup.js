@@ -3843,28 +3843,19 @@ if (exercAllBtn) {
     if (!exercCurrentList.length) return;
     exercAllBtn.disabled = true;
     let done = 0, fail = 0;
-    const total = exercCurrentList.length;
-    const BATCH = 3;
-
-    const waitBtn = (btn) => new Promise((resolve) => {
-      const check = () => {
-        if (btn.classList.contains("done") || (!btn.disabled && btn.textContent === "Criar")) resolve();
-        else setTimeout(check, 500);
-      };
-      setTimeout(check, 500);
-    });
-
-    for (let i = 0; i < total; i += BATCH) {
-      const batch = [];
-      for (let j = i; j < Math.min(i + BATCH, total); j++) {
-        const btn = document.querySelector(`.exerc-criar-btn[data-idx="${j}"]`);
-        if (btn && !btn.disabled) batch.push({ btn, j });
-      }
-      if (!batch.length) continue;
-      exercAllStatus.textContent = `Publicando ${i + 1}–${Math.min(i + BATCH, total)}/${total}…`;
-      batch.forEach(({ btn }) => btn.click());
-      await Promise.all(batch.map(({ btn }) => waitBtn(btn)));
-      batch.forEach(({ btn }) => { if (btn.classList.contains("done")) done++; else fail++; });
+    for (let i = 0; i < exercCurrentList.length; i++) {
+      const btn = document.querySelector(`.exerc-criar-btn[data-idx="${i}"]`);
+      if (!btn || btn.disabled) continue;
+      exercAllStatus.textContent = `Publicando ${i + 1}/${exercCurrentList.length}…`;
+      btn.click();
+      await new Promise((resolve) => {
+        const check = () => {
+          if (btn.classList.contains("done") || (!btn.disabled && btn.textContent === "Criar")) resolve();
+          else setTimeout(check, 500);
+        };
+        setTimeout(check, 500);
+      });
+      if (btn.classList.contains("done")) done++; else fail++;
     }
     exercAllStatus.textContent = `Finalizado: ${done} ok, ${fail} falhou(aram).`;
     exercAllBtn.disabled = false;
