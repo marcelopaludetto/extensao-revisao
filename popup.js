@@ -3657,6 +3657,25 @@ function parseExercDoc(rows) {
 
     const gabM = s.match(/^Alternativa\s+([A-E])\s*[,.:\-–— ]+\s*(correta|incorreta)\s*[.,:\-–—]*\s*(.*)$/i);
     if (gabM) {
+      // Recupera alternativas de lista numerada (1. texto, 2. texto...) do final do enunciado
+      // quando o documento usa lista automática do Word em vez do formato "A) texto"
+      if (!inGabarito && !q.alts?.length && q.enunciado?.length) {
+        const letters = ["A", "B", "C", "D", "E"];
+        const toExtract = [];
+        const copyEnunc = [...q.enunciado];
+        while (copyEnunc.length > 0) {
+          const last = copyEnunc[copyEnunc.length - 1];
+          const m = last.match(/^(\d+)\.\s+([\s\S]+)/);
+          if (m) { toExtract.unshift({ num: parseInt(m[1]), text: m[2].trim() }); copyEnunc.pop(); }
+          else break;
+        }
+        const isSeq = toExtract.length >= 4 && toExtract.length <= 5 &&
+          toExtract.every((item, i) => item.num === i + 1);
+        if (isSeq) {
+          q.enunciado = copyEnunc;
+          toExtract.forEach((item, i) => q.alts.push({ letter: letters[i], text: item.text }));
+        }
+      }
       const letter = gabM[1].toUpperCase();
       if (/^correta$/i.test(gabM[2])) q.correctAlt = letter;
       const firstOpinionLine = (gabM[3] || "").trim();
