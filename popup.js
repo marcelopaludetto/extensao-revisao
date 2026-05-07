@@ -2664,6 +2664,28 @@ if (pubAllBtn) {
   });
 }
 
+// ---------- Glossário: ordena entradas alfabeticamente ----------
+function sortGlossarioContent(content) {
+  // Separa introdução (texto antes do primeiro **termo**)
+  const firstTermIdx = content.search(/^\*\*.+\*\*\s*$/m);
+  if (firstTermIdx < 0) return content;
+
+  const intro = content.slice(0, firstTermIdx).trimEnd();
+  const body  = content.slice(firstTermIdx);
+
+  // Divide em entradas — cada uma começa com uma linha **termo**
+  const entries = body.split(/(?=^\*\*.+\*\*\s*$)/m).map(e => e.trim()).filter(Boolean);
+
+  entries.sort((a, b) => {
+    const termA = (a.match(/^\*\*(.+?)\*\*/)?.[1] || a);
+    const termB = (b.match(/^\*\*(.+?)\*\*/)?.[1] || b);
+    return termA.localeCompare(termB, "pt", { sensitivity: "base" });
+  });
+
+  const sorted = entries.join("\n\n");
+  return intro ? intro + "\n\n" + sorted : sorted;
+}
+
 // ---------- Faça como eu fiz: parsing ----------
 
 // Marcadores de seções — SEM flag 'i': cabeçalhos no doc são CAIXA ALTA,
@@ -2679,9 +2701,16 @@ const FEZ_SECTION_MARKERS = [
 
 function parseFezDoc(text) {
   text = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
-  // Desembrulha linhas 100% em negrito (ex.: "**Aula 1 – ...**", "**PREPARANDO O AMBIENTE**")
-  // para que os regex de cabeçalho/marcador casem no início da linha.
-  text = text.replace(/^\*\*(.+?)\*\*\s*$/gm, "$1");
+  // Desembrulha negrito apenas de linhas que são cabeçalhos/marcadores conhecidos
+  // (ex.: "**Aula 1 – ...**", "**PREPARANDO O AMBIENTE**"). Linhas de conteúdo
+  // como termos de glossário (**Prototipar**) devem manter o negrito.
+  const HEADER_RE = [
+    /^Aula\s+\d+/,
+    ...FEZ_SECTION_MARKERS.map(m => m.re),
+  ];
+  text = text.replace(/^\*\*(.+?)\*\*\s*$/gm, (match, inner) =>
+    HEADER_RE.some(re => re.test(inner)) ? inner : match
+  );
   const lessons = [];
 
   // Divide no início de cada linha "Aula N"
@@ -2723,10 +2752,11 @@ function parseFezDoc(text) {
         const lastFez = [...activities].reverse().find(a => a.type === "FEZ");
         if (lastFez) lastFez.opinion = textToMarkdown(rawContent);
       } else {
+        const md = textToMarkdown(rawContent);
         activities.push({
           type:    found[i].type,
           name:    found[i].name,
-          content: textToMarkdown(rawContent),
+          content: found[i].type === "GLOSSARIO" ? sortGlossarioContent(md) : md,
           opinion: "",
         });
       }
