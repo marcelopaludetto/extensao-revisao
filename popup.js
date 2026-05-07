@@ -3676,7 +3676,12 @@ function parseExercDoc(rows) {
           toExtract.forEach((item, i) => q.alts.push({ letter: letters[i], text: item.text }));
         }
       }
-      const letter = gabM[1].toUpperCase();
+      let letter = gabM[1].toUpperCase();
+      // Letra duplicada no doc (ex: dois "Alternativa B") → avança para a próxima disponível
+      if (q.altOpinions[letter] !== undefined) {
+        const next = ["A","B","C","D","E"].find(l => q.altOpinions[l] === undefined);
+        if (next) letter = next;
+      }
       if (/^correta$/i.test(gabM[2])) q.correctAlt = letter;
       const firstOpinionLine = (gabM[3] || "").trim();
       if (firstOpinionLine) q.altOpinions[letter] = firstOpinionLine;
