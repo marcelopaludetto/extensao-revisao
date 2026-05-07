@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Start facilitadora de revisão",
-  "version": "4.0",
+  "version": "5.0",
   "update_url": "https://hub-producao-conteudo.vercel.app/update.xml",
   "description": "Deus existe e é brasileiro, mas não é o Bolsonaro. Ele é a Start Revisão!  (Escrito por IA)",
   "permissions": ["activeTab", "scripting", "storage", "notifications", "downloads", "identity", "tabs"],

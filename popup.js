@@ -3737,7 +3737,7 @@ function parseExercDoc(rows) {
       }
     }
 
-    const gabM = s.match(/^Alternativa\s+([A-E])\s*[,.:\-–— ]+\s*(correta|incorreta)\s*[.,:\-–—]*\s*(.*)$/i);
+    const gabM = s.match(/^Alternativa\s+([A-E])\s*[,.:\-–— ]*\(?\s*(correta|incorreta)\s*\)?\s*[.,:\-–—)]*\s*(.*)$/i);
     if (gabM) {
       // Recupera alternativas de lista numerada (1. texto, 2. texto...) do final do enunciado
       // quando o documento usa lista automática do Word em vez do formato "A) texto"
