@@ -88,13 +88,20 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg?.type !== "ALURA_REVISOR_LOG_USAGE") return;
 
   (async () => {
+    console.log("[Revisor][DEBUG] background recebeu ALURA_REVISOR_LOG_USAGE:", msg.entry || msg.entries);
     const entries = Array.isArray(msg.entries) ? msg.entries : [msg.entry || msg];
     const results = [];
 
     for (const entry of entries) {
       const data = UsageReport.normalizeUsageLogEntry(entry);
-      if (!data.feature || data.count <= 0) continue;
-      results.push(await UsageReport.queueUsageLogEntry(data));
+      console.log("[Revisor][DEBUG] entry normalizada — feature:", data.feature, "count:", data.count);
+      if (!data.feature || data.count <= 0) {
+        console.warn("[Revisor][DEBUG] entry descartada (feature ou count inválido):", data);
+        continue;
+      }
+      const result = await UsageReport.queueUsageLogEntry(data);
+      console.log("[Revisor][DEBUG] resultado do queueUsageLogEntry:", result);
+      results.push(result);
     }
 
     const failed = results.filter(r => !r.ok);

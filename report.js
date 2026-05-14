@@ -112,6 +112,7 @@
       return { ok: false, skipped: true, error: "Usage log entry missing feature or count" };
     }
 
+    console.log("[Revisor][DEBUG] postUsageLogEntry — enviando para Apps Script:", data.feature, data.count, data.courseId);
     const response = await fetchWithTimeoutLocal(
       USAGE_LOG_WEB_APP_URL,
       {
@@ -123,6 +124,7 @@
     );
 
     const text = await response.text().catch(() => "");
+    console.log("[Revisor][DEBUG] Apps Script respondeu — status:", response.status, "body:", text.slice(0, 300));
     if (!response.ok) {
       throw new Error(`Apps Script returned HTTP ${response.status}`);
     }
@@ -139,6 +141,7 @@
       throw new Error("Apps Script returned empty response");
     }
 
+    console.log("[Revisor][DEBUG] log enviado com sucesso:", data.feature);
     return { ok: true, feature: data.feature, courseId: data.courseId, count: data.count };
   }
 

@@ -1536,28 +1536,28 @@
     state.error = error || null;
     await setState(state);
     try {
-      await sendToBackground({
-        type: "ALURA_REVISOR_LOG_USAGE",
-        entry: {
-          eventType: "feature_usage",
-          feature: "unit_review_completed",
-          action: state.finished ? "completed" : "interrupted",
-          courseId: state.courseId || "",
-          courseName: state._courseName || "",
-          count: 1,
-          metadata: {
-            productType: state.productType || "",
-            platform: state.platform || "",
-            finished: !!state.finished,
-            error: state.error || "",
-            steps: state.steps || 0,
-            iconStatus: state.iconStatus || "",
-            totalActiveVideos: state.totalActiveVideos || 0,
-          },
+      const logEntry = {
+        eventType: "feature_usage",
+        feature: "unit_review_completed",
+        action: state.finished ? "completed" : "interrupted",
+        courseId: state.courseId || "",
+        courseName: state._courseName || "",
+        count: 1,
+        metadata: {
+          productType: state.productType || "",
+          platform: state.platform || "",
+          finished: !!state.finished,
+          error: state.error || "",
+          steps: state.steps || 0,
+          iconStatus: state.iconStatus || "",
+          totalActiveVideos: state.totalActiveVideos || 0,
         },
-      });
+      };
+      console.log("[Revisor][DEBUG] Enviando log unit_review_completed:", logEntry);
+      const response = await sendToBackground({ type: "ALURA_REVISOR_LOG_USAGE", entry: logEntry });
+      console.log("[Revisor][DEBUG] Resposta do background para log:", response);
     } catch (e) {
-      console.warn("[Revisor] Falha ao registrar revisao de unidade", e);
+      console.warn("[Revisor][DEBUG] Falha ao registrar revisao de unidade:", e?.message || e);
     }
     showFinalPopup(state);
   }
@@ -2159,6 +2159,28 @@
     const themeOk = expectedTheme ? (theme === null ? null : theme === expectedTheme) : undefined;
     console.log("[Revisor] theme:", theme, "expected:", expectedTheme, "ok:", themeOk);
     console.log("[Revisor] sub127:", subResults.sub127, "sub26:", subResults.sub26);
+
+    const logEntry = {
+      eventType: "feature_usage",
+      feature: "unit_review_completed",
+      action: "completed",
+      courseId: courseId || "",
+      courseName: "",
+      count: 1,
+      metadata: {
+        productType: productType || "",
+        platform: effectivePlatform || "",
+        finished: true,
+        error: "",
+        steps: 0,
+        iconStatus: "",
+        totalActiveVideos: 0,
+      },
+    };
+    console.log("[Revisor][DEBUG] startFromHome — enviando log unit_review_completed:", logEntry);
+    sendToBackground({ type: "ALURA_REVISOR_LOG_USAGE", entry: logEntry })
+      .then(r => console.log("[Revisor][DEBUG] startFromHome — resposta do background:", r))
+      .catch(e => console.warn("[Revisor][DEBUG] startFromHome — falha ao registrar log:", e?.message || e));
 
     showFinalPopup({
       running: false,
