@@ -71,6 +71,7 @@
     const iframe = document.createElement("iframe");
     iframe.id = "arp-guia-iframe";
     iframe.src = chrome.runtime.getURL("popup.html") + "#guia";
+    iframe.allow = "clipboard-write";
     iframe.style.cssText = `
       border: 0;
       width: 100%;

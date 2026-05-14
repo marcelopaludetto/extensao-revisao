@@ -4134,6 +4134,25 @@ const guiaCopyAllBtn = document.getElementById("guia-copy-all-btn");
 let guiaLessons = [];
 let guiaCourseId = "";
 
+function guiaCopyText(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).catch(() => guiaCopyTextFallback(text));
+  } else {
+    guiaCopyTextFallback(text);
+  }
+}
+
+function guiaCopyTextFallback(text) {
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  document.execCommand("copy");
+  document.body.removeChild(ta);
+}
+
 async function guiaCheckPage() {
   const tab = await getActiveTab().catch(() => null);
   if (!tab) {
@@ -4163,10 +4182,12 @@ guiaLoadBtn.addEventListener("click", async () => {
   try {
     const tab = await getActiveTab();
 
-    const [injResult] = await chrome.scripting.executeScript({
+    // Roda tudo dentro do contexto da página (cookies de sessão corretos)
+    const [result] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
-      func: () => {
-        const lessons = [];
+      func: async () => {
+        // 1. Scrapar estrutura de aulas e links de transcrição
+        const lessonLinks = [];
         document.querySelectorAll(".lesson").forEach(lessonEl => {
           const h2Text = (lessonEl.querySelector("h2")?.textContent || "Aula ?")
             .trim().replace(/\s+/g, " ");
@@ -4175,37 +4196,56 @@ guiaLoadBtn.addEventListener("click", async () => {
             const href = a.getAttribute("href");
             if (href) hrefs.push(href);
           });
-          if (hrefs.length) lessons.push({ label: h2Text, hrefs });
+          if (hrefs.length) lessonLinks.push({ label: h2Text, hrefs });
         });
-        return lessons;
+
+        if (!lessonLinks.length) return { error: "nenhuma" };
+
+        // 2. Buscar cada transcrição (mesmo origem = cookies automáticos)
+        function extractText(html) {
+          const doc = new DOMParser().parseFromString(html, "text/html");
+          ["nav", "header", "footer"].forEach(tag =>
+            doc.querySelectorAll(tag).forEach(el => el.remove())
+          );
+          const el = doc.querySelector("pre")
+            || doc.querySelector(".transcription")
+            || doc.querySelector(".content")
+            || doc.querySelector("article")
+            || doc.querySelector("main");
+          return (el ? el.textContent : doc.body.textContent).trim();
+        }
+
+        const lessons = [];
+        for (const lesson of lessonLinks) {
+          const texts = [];
+          for (const href of lesson.hrefs) {
+            try {
+              const resp = await fetch(href);
+              if (!resp.ok) { texts.push("[Erro ao carregar]"); continue; }
+              const html = await resp.text();
+              texts.push(extractText(html));
+            } catch {
+              texts.push("[Erro ao carregar]");
+            }
+          }
+          lessons.push({ label: lesson.label, transcription: texts.join("\n\n") });
+        }
+        return { lessons };
       }
     });
 
-    const lessonLinks = injResult?.result;
-    if (!lessonLinks?.length) {
+    const data = result?.result;
+    if (!data || data.error === "nenhuma") {
       guiaProgressEl.textContent = "Nenhuma transcrição concluída encontrada nesta página.";
       guiaLoadBtn.disabled = false;
       return;
     }
 
-    const totalTasks = lessonLinks.reduce((s, l) => s + l.hrefs.length, 0);
-    let done = 0;
-    guiaProgressEl.textContent = `Carregando 0/${totalTasks}…`;
-
-    for (const lesson of lessonLinks) {
-      const texts = [];
-      for (const href of lesson.hrefs) {
-        try {
-          const resp = await fetch(`https://guia.alura.dev${href}`, { credentials: "include" });
-          const html = await resp.text();
-          texts.push(guiaExtractText(html));
-        } catch {
-          texts.push("[Erro ao carregar]");
-        }
-        done++;
-        guiaProgressEl.textContent = `Carregando ${done}/${totalTasks}…`;
-      }
-      guiaLessons.push({ label: lesson.label, transcription: texts.join("\n\n") });
+    guiaLessons = data.lessons || [];
+    if (!guiaLessons.length) {
+      guiaProgressEl.textContent = "Não foi possível carregar as transcrições.";
+      guiaLoadBtn.disabled = false;
+      return;
     }
 
     guiaRenderResults();
@@ -4218,22 +4258,13 @@ guiaLoadBtn.addEventListener("click", async () => {
   }
 });
 
-function guiaExtractText(html) {
-  const doc = new DOMParser().parseFromString(html, "text/html");
-  ["nav", "header", "footer"].forEach(tag =>
-    doc.querySelectorAll(tag).forEach(el => el.remove())
-  );
-  const el = doc.querySelector("pre")
-    || doc.querySelector(".transcription")
-    || doc.querySelector(".content")
-    || doc.querySelector("article")
-    || doc.querySelector("main");
-  return (el ? el.textContent : doc.body.textContent).trim();
-}
-
 function guiaRenderResults() {
   guiaResultsEl.innerHTML = "";
-  guiaLessons.forEach((lesson, i) => {
+
+  // snapshot capturado no momento do render — evita leitura stale no onclick
+  const lessons = guiaLessons.slice();
+
+  lessons.forEach((lesson) => {
     const card = document.createElement("div");
     card.className = "guia-card";
 
@@ -4248,14 +4279,14 @@ function guiaRenderResults() {
     copyBtn.className = "guia-copy-btn";
     copyBtn.textContent = "Copiar";
     copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(lesson.transcription);
+      guiaCopyText(lesson.transcription);
       copyBtn.textContent = "Copiado!";
       copyBtn.classList.add("done");
       setTimeout(() => { copyBtn.textContent = "Copiar"; copyBtn.classList.remove("done"); }, 2000);
       logFeatureUsage("guia_transcription_copied", "copy_lesson", {
         courseId: guiaCourseId,
         count: 1,
-        metadata: { lessonLabel: lesson.label, lessonsTotal: guiaLessons.length },
+        metadata: { lessonLabel: lesson.label, lessonsTotal: lessons.length },
       });
     });
 
@@ -4270,21 +4301,22 @@ function guiaRenderResults() {
     card.appendChild(textEl);
     guiaResultsEl.appendChild(card);
   });
-}
 
-guiaCopyAllBtn.addEventListener("click", () => {
-  const all = guiaLessons
-    .map(l => `## ${l.label.toUpperCase()}\n${l.transcription}`)
-    .join("\n\n");
-  navigator.clipboard.writeText(all);
-  guiaCopyAllBtn.textContent = "Copiado!";
-  setTimeout(() => { guiaCopyAllBtn.textContent = "Copiar todas"; }, 2000);
-  logFeatureUsage("guia_transcription_copied", "copy_all", {
-    courseId: guiaCourseId,
-    count: guiaLessons.length,
-    metadata: { lessonsCount: guiaLessons.length },
-  });
-});
+  // Redefine o handler no render — fecha sobre o snapshot correto
+  guiaCopyAllBtn.onclick = () => {
+    const all = lessons
+      .map(l => `## ${l.label.toUpperCase()}\n${l.transcription}`)
+      .join("\n\n");
+    guiaCopyText(all);
+    guiaCopyAllBtn.textContent = "Copiado!";
+    setTimeout(() => { guiaCopyAllBtn.textContent = "Copiar todas"; }, 2000);
+    logFeatureUsage("guia_transcription_copied", "copy_all", {
+      courseId: guiaCourseId,
+      count: lessons.length,
+      metadata: { lessonsCount: lessons.length },
+    });
+  };
+}
 
 // ---------- Inicialização: carrega credenciais salvas nos campos ----------
 (async () => {

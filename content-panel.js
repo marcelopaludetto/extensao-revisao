@@ -70,6 +70,7 @@
     const iframe = document.createElement("iframe");
     iframe.id = "arp-iframe";
     iframe.src = chrome.runtime.getURL("popup.html");
+    iframe.allow = "clipboard-write";
     iframe.style.cssText = `
       border: 0;
       width: 100%;
