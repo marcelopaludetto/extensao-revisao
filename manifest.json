@@ -40,6 +40,11 @@
       "matches": ["https://www.dropbox.com/*"],
       "js": ["content-dropbox.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://guia.alura.dev/status/*"],
+      "js": ["content-guia.js"],
+      "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
@@ -49,7 +54,7 @@
     },
     {
       "resources": ["popup.html", "popup.js"],
-      "matches": ["https://cursos.alura.com.br/*"]
+      "matches": ["https://cursos.alura.com.br/*", "https://guia.alura.dev/*"]
     }
   ],
   "browser_specific_settings": {

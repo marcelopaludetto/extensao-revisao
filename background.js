@@ -4,13 +4,18 @@ if (typeof self.UsageReport === "undefined" && typeof importScripts === "functio
 
 const UsageReport = self.UsageReport;
 const ALURA_ORIGIN = "https://cursos.alura.com.br";
+const GUIA_STATUS_PREFIX = "https://guia.alura.dev/status/";
 const EXTENSION_ORIGIN = new URL(chrome.runtime.getURL("")).origin;
+
+function isEmbeddedPanelTab(url) {
+  return (url || "").startsWith(ALURA_ORIGIN) ||
+         (url || "").startsWith(GUIA_STATUS_PREFIX);
+}
 
 function applyActionPopupForTab(tab) {
   if (!tab || !tab.id) return;
-  const isAlura = (tab.url || "").startsWith(ALURA_ORIGIN);
   try {
-    chrome.action.setPopup({ tabId: tab.id, popup: isAlura ? "" : "popup.html" });
+    chrome.action.setPopup({ tabId: tab.id, popup: isEmbeddedPanelTab(tab.url) ? "" : "popup.html" });
   } catch (_) {}
 }
 
@@ -31,7 +36,7 @@ chrome.runtime.onStartup.addListener(() => {
 
 chrome.action.onClicked.addListener((tab) => {
   if (!tab || !tab.id) return;
-  if (!(tab.url || "").startsWith(ALURA_ORIGIN)) return;
+  if (!isEmbeddedPanelTab(tab.url)) return;
   chrome.tabs.sendMessage(tab.id, { type: "ALURA_REVISOR_TOGGLE_PANEL" }, () => {
     void chrome.runtime.lastError;
   });

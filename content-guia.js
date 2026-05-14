@@ -1,7 +1,7 @@
 (function () {
-  const PANEL_ID = "alura-revisor-panel-root";
-  const COLLAPSED_KEY = "aluraRevisorPanelCollapsed";
-  const HIDDEN_KEY = "aluraRevisorPanelHidden";
+  const PANEL_ID    = "alura-revisor-guia-panel-root";
+  const HIDDEN_KEY  = "aluraRevisorGuiaPanelHidden";
+  const COLLAPSED_KEY = "aluraRevisorGuiaPanelCollapsed";
   const PANEL_WIDTH = 490;
 
   if (window.top !== window.self) return;
@@ -58,24 +58,26 @@
       font-weight: 700;
       cursor: move;
       user-select: none;
+      flex-shrink: 0;
     `;
     bar.innerHTML = `
       <span style="letter-spacing:0.5px;">Start <span style="color:#f0f4f8;">Revisor</span></span>
       <div style="display:flex;gap:6px;">
-        <button id="arp-toggle" title="Recolher/Expandir" style="background:transparent;border:1px solid #50DEFF;color:#50DEFF;border-radius:4px;padding:2px 8px;font-family:inherit;font-size:11px;cursor:pointer;">–</button>
-        <button id="arp-close" title="Fechar (reabrir pelo ícone da extensão)" style="background:transparent;border:1px solid #CA3328;color:#CA3328;border-radius:4px;padding:2px 8px;font-family:inherit;font-size:11px;cursor:pointer;">×</button>
+        <button id="arp-guia-toggle" title="Recolher/Expandir" style="background:transparent;border:1px solid #50DEFF;color:#50DEFF;border-radius:4px;padding:2px 8px;font-family:inherit;font-size:11px;cursor:pointer;">–</button>
+        <button id="arp-guia-close" title="Fechar (reabrir pelo ícone da extensão)" style="background:transparent;border:1px solid #CA3328;color:#CA3328;border-radius:4px;padding:2px 8px;font-family:inherit;font-size:11px;cursor:pointer;">×</button>
       </div>
     `;
 
     const iframe = document.createElement("iframe");
-    iframe.id = "arp-iframe";
-    iframe.src = chrome.runtime.getURL("popup.html");
+    iframe.id = "arp-guia-iframe";
+    iframe.src = chrome.runtime.getURL("popup.html") + "#guia";
     iframe.style.cssText = `
       border: 0;
       width: 100%;
       height: 100%;
       background: #f0f4f8;
       flex: 1;
+      min-height: 0;
     `;
 
     root.appendChild(bar);
@@ -89,13 +91,13 @@
       });
     } catch (_) {}
 
-    bar.querySelector("#arp-close").addEventListener("click", (e) => {
+    bar.querySelector("#arp-guia-close").addEventListener("click", (e) => {
       e.stopPropagation();
       setHidden(true);
     });
 
     let collapsed = false;
-    const toggleBtn = bar.querySelector("#arp-toggle");
+    const toggleBtn = bar.querySelector("#arp-guia-toggle");
 
     function applyCollapsed(v) {
       collapsed = v;
@@ -133,7 +135,7 @@
       const x = Math.max(0, Math.min(window.innerWidth - 40, e.clientX - offX));
       const y = Math.max(0, Math.min(window.innerHeight - 40, e.clientY - offY));
       root.style.left = x + "px";
-      root.style.top = y + "px";
+      root.style.top  = y + "px";
       root.style.right = "auto";
     });
     document.addEventListener("mouseup", () => {
