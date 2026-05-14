@@ -15,6 +15,7 @@
     CAPTION_GENERATION: "caption_generation",
     ICON_UPLOADED: "icon_uploaded",
     ACTIVITY_ORDER_FIXED: "activity_order_fixed",
+    GUIA_TRANSCRIPTION_COPIED: "guia_transcription_copied",
   });
 
   function sanitizeUsageMetadata(metadata) {

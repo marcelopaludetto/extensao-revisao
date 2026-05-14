@@ -4132,6 +4132,7 @@ const guiaResultsEl  = document.getElementById("guia-results");
 const guiaCopyAllBtn = document.getElementById("guia-copy-all-btn");
 
 let guiaLessons = [];
+let guiaCourseId = "";
 
 async function guiaCheckPage() {
   const tab = await getActiveTab().catch(() => null);
@@ -4146,7 +4147,8 @@ async function guiaCheckPage() {
     guiaLoadBtn.style.display = "none";
     return;
   }
-  guiaStatusEl.textContent = `Curso ${match[1]} detectado.`;
+  guiaCourseId = match[1];
+  guiaStatusEl.textContent = `Curso ${guiaCourseId} detectado.`;
   guiaLoadBtn.style.display = "";
 }
 
@@ -4250,6 +4252,11 @@ function guiaRenderResults() {
       copyBtn.textContent = "Copiado!";
       copyBtn.classList.add("done");
       setTimeout(() => { copyBtn.textContent = "Copiar"; copyBtn.classList.remove("done"); }, 2000);
+      logFeatureUsage("guia_transcription_copied", "copy_lesson", {
+        courseId: guiaCourseId,
+        count: 1,
+        metadata: { lessonLabel: lesson.label, lessonsTotal: guiaLessons.length },
+      });
     });
 
     header.appendChild(title);
@@ -4272,6 +4279,11 @@ guiaCopyAllBtn.addEventListener("click", () => {
   navigator.clipboard.writeText(all);
   guiaCopyAllBtn.textContent = "Copiado!";
   setTimeout(() => { guiaCopyAllBtn.textContent = "Copiar todas"; }, 2000);
+  logFeatureUsage("guia_transcription_copied", "copy_all", {
+    courseId: guiaCourseId,
+    count: guiaLessons.length,
+    metadata: { lessonsCount: guiaLessons.length },
+  });
 });
 
 // ---------- Inicialização: carrega credenciais salvas nos campos ----------
